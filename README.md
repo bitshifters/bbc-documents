@@ -6,7 +6,7 @@ Predominantly old stuff, with the odd remastered item.
 
 # TOC
 
-![](./AppNotes/) - Acorn app notes
+[AppNotes](./AppNotes/) - Acorn app notes
 
 ./AUG/ - Advanced User Guide, New Advanced User Guide
 
