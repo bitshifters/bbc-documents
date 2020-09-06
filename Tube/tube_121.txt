@@ -1,0 +1,1948 @@
+REM >Tube121Src
+REM
+REM
+REM This is Acorn's Tube OS 1.10, plus several improvements :
+REM
+REM - Implemented most obvious and some less obvious optimisations, primarily by
+REM   taking advantage of 65C02 specific instructions (which the original code did
+REM   not do at all).
+REM - Hex digits were improperly parsed, e.g. '@' would be interpreted as '9'.
+REM - E.g. '*GOA' was mistakenly interpreted as '*GO A' (it is now rejected as an
+REM   unknown command, as it should have been).
+REM - *Help followed by a(ny) keyword caused the 'TUBE' line to be displayed (it
+REM   should only be displayed if the keyword is recognized or absent).
+REM - The carry flag on entering an executable was undefined (it should have been
+REM   clear for entering due to reset (power on or BREAK), and set otherwise).
+REM - OSWORD 5 sends 4 bytes, OSWORD 14 sends 8 (to support reason code 2).
+REM - Added the *GOS command, which transfers control to the supervisor prompt.
+REM - Moved some reset-time only code to the bottom 2 KB of the ROM, to make more
+REM   room for the runtime code in the top 2 KB.
+REM
+REM Base code by Acorn. Improvements by John Kortink, © Zeridajh 2009..2014.
+REM
+REM Run on 6502 grokking BASIC V, e.g. Basic6502 (google 'Kortink Basic6502')
+REM
+REM
+
+`Source_Version$ = "1.21"
+
+DIM object_code% 64 * 1024
+
+PROC`6502code_preassemble
+
+PRINT '"Assembling ... ";
+
+FOR `Assembly_Pass% = 1 TO 2
+
+  `P = %10100 OR (`Assembly_Pass% - 1) << 1
+
+  P% = rom_boot%
+  O% = object_code% + rom_boot%
+
+  PROC`6502code_code
+
+NEXT
+
+PRINT "Saving ... ";
+
+SYS "OS_File", 10, "TubeOS121", &FFD,, object_code% + &F000, object_code% + &10000
+
+PRINT ;"Done"'
+
+END
+
+
+
+DEFPROC`6502code_preassemble
+
+REM
+REM
+REM Miscellaneous
+REM
+REM
+
+rom_boot% = &F000
+rom_copy% = &F800
+
+FOR A% = object_code% TO A% + &FFFF:?A% = &FF:NEXT
+
+default_oshwm% = &0800
+default_himem% = &F800
+
+mem_ptr_size% = 2
+
+REM
+REM
+REM Register addresses
+REM
+REM
+
+tube_1_flag% = &FEF8
+tube_1_data% = &FEF9
+tube_2_flag% = &FEFA
+tube_2_data% = &FEFB
+tube_3_flag% = &FEFC
+tube_3_data% = &FEFD
+tube_4_flag% = &FEFE
+tube_4_data% = &FEFF
+
+REM
+REM
+REM Software vectors
+REM
+REM
+
+sw_vectors% = &200
+
+osvec_brk%  = &202
+osvec_irq1% = &204
+osvec_irq2% = &206
+osvec_cli%  = &208
+osvec_byte% = &20A
+osvec_word% = &20C
+osvec_wrch% = &20E
+osvec_rdch% = &210
+osvec_file% = &212
+osvec_args% = &214
+osvec_bget% = &216
+osvec_bput% = &218
+osvec_gbpb% = &21A
+osvec_find% = &21C
+osvec_evnt% = &220
+
+REM
+REM
+REM Tube call reason codes
+REM
+REM
+
+tubrc_osrdch%    = &00
+tubrc_oscli%     = &02
+tubrc_osbyte_lo% = &04
+tubrc_osbyte_hi% = &06
+tubrc_osword_nn% = &08
+tubrc_osword_00% = &0A
+tubrc_osargs%    = &0C
+tubrc_osbget%    = &0E
+tubrc_osbput%    = &10
+tubrc_osfind%    = &12
+tubrc_osfile%    = &14
+tubrc_osgbpb%    = &16
+
+REM
+REM
+REM Workspace
+REM
+REM
+
+tubos_nmiptrad = &EE
+tubos_running  = &F0
+tubos_himem    = &F2
+tubos_transad  = &F4
+tubos_genptr1  = &F8
+tubos_genptr2  = &FA
+tubos_hexvalue = &FA
+tubos_irqa     = &FC
+tubos_lastbrk  = &FD
+tubos_escape   = &FF
+
+tubos_strbuf_first = &236
+tubos_strbuf_final = &2FF
+
+tubos_genva2a = tubos_genptr2 + 0
+tubos_genva2b = tubos_genptr2 + 1
+
+ENDPROC
+
+
+
+DEFPROC`6502code_code
+
+[OPT `P
+
+
+
+\
+\
+\ Co-pro initialisation
+\
+\
+ SEI                                    \ Disable interrupts
+\
+ LDX #&FF                               \ Initialise processor stack
+ TXS
+\
+ JSR copin_copy_os_code                 \ Copy operating system code
+\
+ LDA #hwrun_rst MOD 256                 \ Change reset vector from 'hard' to 'soft'
+ STA hwvec_rst+0
+ LDA #hwrun_rst DIV 256
+ STA hwvec_rst+1
+\
+ LDA #swrun_wrch MOD 256                \ Pre-set OSWRCHV (for boot up message)
+ STA osvec_wrch%+0
+ LDA #swrun_wrch DIV 256
+ STA osvec_wrch%+1
+\
+ LDX #copin_join_end - copin_join - 1   \ Copy 'join' routine
+\
+.copin_cpjoi
+\
+ LDA copin_join,X
+ STA &100,X
+\
+ DEX
+ BPL copin_cpjoi
+\
+ JMP &100                               \ Execute it
+\
+\
+\
+.copin_join
+\
+ LDA tube_1_flag%                       \ Switch from ROM -> RAM
+\
+ JSR display_string                     \ Display boot up message
+\
+ EQUB &0A
+ EQUS "Acorn TUBE 65C02 64K"
+ EQUB &0A:EQUB &0A:EQUB &0D
+ NOP
+\
+ JMP (hwvec_rst)                        \ Continue with reset code
+\
+.copin_join_end
+\
+\
+\
+.copin_copy_os_code
+\
+ LDA #rom_copy% DIV 256                 \ Copy code (ROM -> RAM)
+ STA tubos_genptr1+1
+\
+ LDY #&00
+ STY tubos_genptr1+0
+\
+.copin_cocod_page
+\
+ LDA tubos_genptr1+1
+\
+ LDX #&00
+\
+ CMP #&FE
+ BNE copin_cocod_byte
+\
+ LDX #&F0
+\
+.copin_cocod_byte
+\
+ LDA (tubos_genptr1),Y
+ STA (tubos_genptr1),Y
+\
+ INY
+ DEX
+ BNE copin_cocod_byte
+\
+ INC tubos_genptr1+1
+ BNE copin_cocod_page
+\
+ RTS
+
+
+
+]
+
+D% = rom_copy% - P%:P% += D%:O% += D%
+
+[OPT `P
+
+
+
+.hwrun_rst
+\
+ LDX #std_swrun_end - std_swrun - 1     \ Initialise software vectors
+\
+.hwrst_swrun
+\
+ LDA std_swrun,X
+ STA sw_vectors%,X
+\
+ DEX
+ BPL hwrst_swrun
+\
+ TXS                                    \ Initialise processor stack
+\
+ STZ tubos_escape                       \ Initialise global variables
+\
+ STZ tubos_himem+0
+ LDA #default_himem% DIV 256
+ STA tubos_himem+1
+\
+ LDA tubos_running+0                    \ (re-enter previous app by default)
+ STA tubos_transad+0
+ LDA tubos_running+1
+ STA tubos_transad+1
+\
+ CLI                                    \ Bring on the IRQs
+\
+.hwrst_softjmp
+\
+ BRA supervisor_cli                     \ On hard reset, continue (but see below)
+\
+]:hwrst_softjmp_off% = O%?-1:O%?-1 = 0:[OPT `P
+\
+ LDA #0                                 \ Signal 'parasite initialised'
+ JSR os_wrch%                           \ (ends Tube main initialisation)
+\
+ LDA #hwrst_softjmp_off%                \ On soft reset, to supervisor (see above)
+ STA hwrst_softjmp+1
+\
+ JSR a_from_fifo_2                      \ New or previous app to (re-)enter ?
+ CMP #&80
+ BEQ running_executable_hard            \ Yes, do so (otherwise to supervisor)
+
+
+
+.supervisor_cli
+\
+ LDA #ASC"*"                            \ Display supervisor prompt
+ JSR os_wrch%
+\
+ LDX #supervisor_osword_0 MOD 256       \ Receive OSCLI command
+ LDY #supervisor_osword_0 DIV 256
+ LDA #0
+ JSR os_word%
+\
+ JSR escape_if_c
+\
+ LDX #tubos_strbuf_first MOD 256        \ Execute OSCLI command
+ LDY #tubos_strbuf_first DIV 256
+ JSR os_cli%
+\
+ BRA supervisor_cli                     \ Ad infinitum
+
+
+
+.running_executable_hard
+\
+ CLC                                    \ Flag 'entered from reset'
+\
+ BRA running_executable                 \ Continue
+\
+.running_executable_soft
+\
+ SEC                                    \ Flag 'not entered from reset'
+\
+.running_executable
+\
+ PHP                                    \ Remember 'entered from' flag
+\
+ LDA tubos_transad+0                    \ Executable becomes new app
+ STA tubos_running+0
+ STA tubos_himem+0
+ LDA tubos_transad+1
+ STA tubos_running+1
+ STA tubos_himem+1
+\
+ LDY #7                                 \ Executable has ROM header ?
+ LDA (tubos_running),Y
+ TAY
+\
+ LDX #3
+\
+.runex_copch
+\
+ LDA (tubos_running),Y
+ CMP runex_copyright,X
+ BNE runex_enter                        \ (no)
+\
+ INY
+ DEX
+ BPL runex_copch
+\
+ CLC                                    \ ROM's (c) message is 'last BRK'
+ LDY #7
+ LDA tubos_running+0
+ ADC (tubos_running),Y
+ STA tubos_lastbrk+0
+ LDA tubos_running+1
+ ADC #0
+ STA tubos_lastbrk+1
+\
+ DEY                                    \ ROM is 6502 coded language ?
+ LDA (tubos_running),Y
+ BIT #1<<6
+ BEQ runex_error_notalanguage           \ (no, not a language)
+ BIT #%1101
+ BNE runex_error_cannotruncode          \ (no, not 6502 coded)
+\
+.runex_enter
+\
+ PLP                                    \ Enter executable
+ LDA #1                                 \ (may not return)
+ JMP (tubos_running)
+\
+.runex_error_notalanguage
+\
+ JSR set_default_brk_handler            \ Throw 'not a language' error
+\
+ BRK
+ EQUB 0
+ EQUS "This is not a language"
+ EQUB 0
+\
+.runex_error_cannotruncode
+\
+ JSR set_default_brk_handler            \ Throw 'not 6502 coded' error
+\
+ BRK
+ EQUB 0
+ EQUS "I cannot run this code"
+ EQUB 0
+\
+\
+\
+.runex_copyright
+\
+ EQUS ")C(":EQUB 0
+
+
+
+.set_default_brk_handler
+\
+ LDA #swrun_brk MOD 256                 \ Restore default BRK handler
+ STA osvec_brk%+0                       \ (current one may be unusable)
+ LDA #swrun_brk DIV 256
+ STA osvec_brk%+1
+\
+ RTS
+
+
+
+.display_string
+\
+ PLA                                    \ Display in-line string
+ STA tubos_genptr2+0
+ PLA
+ STA tubos_genptr2+1
+\
+.dinls_char
+\
+ INC tubos_genptr2+0
+ BNE `generated_label_1
+ INC tubos_genptr2+1
+ .`generated_label_1
+\
+ LDA (tubos_genptr2)
+ BMI dinls_done                         \ (top-bit-set terminated)
+\
+ JSR os_wrch%
+\
+ BRA dinls_char
+\
+.dinls_done
+\
+ JMP (tubos_genptr2)
+
+
+
+.transmit_string_xy
+\
+ STX tubos_genptr1+0                    \ Transmit string @yyxx to host
+ STY tubos_genptr1+1
+\
+.transmit_string_ptr1
+\
+ LDY #0                                 \ Transmit string @ptr1 to host
+\
+.trstr_char
+\
+ LDA (tubos_genptr1),Y
+ FNtube_2_wait_put
+ STA tube_2_data%
+\
+ INY
+\
+ CMP #&0D                               \ (CR terminated)
+ BNE trstr_char
+\
+ LDY tubos_genptr1+1
+\
+ RTS
+
+
+
+.parse_next_nosp
+\
+ INY                                    \ Skip current character
+\
+.parse_curr_nosp
+\
+ LDA (tubos_genptr1),Y                  \ Skip subsequent spaces
+\
+ CMP #ASC" "
+ BEQ parse_next_nosp
+\
+ CMP #&0D                               \ Flag 'non-space is CR'
+\
+ RTS
+
+
+
+.parse_hex_value
+\
+ LDX #&00                               \ Initialise hex value accumulator
+ STX tubos_hexvalue+0                   \ (and X = 0 means 'no digits' !)
+ STX tubos_hexvalue+1
+\
+.pahex_char
+\
+ LDA (tubos_genptr1),Y                  \ Current character
+\
+ CMP #ASC"0"                            \ Verify as hex digit
+ BCC pahex_done
+ CMP #ASC"9"+1
+ BCC pahex_nibbl
+ AND #&DF
+ CMP #ASC"A"
+ BCC pahex_done
+ CMP #ASC"F"+1
+ BCS pahex_done
+ SBC #ASC"A"-(ASC"9"+1)-1
+\
+.pahex_nibbl
+\
+ ASL A                                  \ Update hex value
+ ASL A
+ ASL A
+ ASL A
+\
+ LDX #3
+\
+.pahex_shift
+\
+ ASL A
+ ROL tubos_hexvalue+0
+ ROL tubos_hexvalue+1
+\
+ DEX
+ BPL pahex_shift
+\
+ INY                                    \ Next character
+ BNE pahex_char
+\
+.pahex_done
+\
+ RTS
+
+
+
+.swrun_brk
+\
+ LDX #&FF                               \ Initialise processor stack
+ TXS                                    \ (we won't be returning)
+\
+ JSR os_newl%                           \ Display the error message
+\
+ LDY #1
+\
+.swbrk_char
+\
+ LDA (tubos_lastbrk),Y
+ BEQ swbrk_done
+\
+ JSR os_wrch%
+\
+ INY
+ BNE swbrk_char
+\
+.swbrk_done
+\
+ JSR os_newl%
+\
+ JMP supervisor_cli                     \ And enter the supervisor
+
+
+
+.swrun_wrch
+\
+ FNtube_1_wait_put                      \ Perform OSWRCH
+ STA tube_1_data%
+\
+ RTS
+
+
+
+.swrun_rdch
+\
+ LDA #tubrc_osrdch%                     \ Perform OSRDCH
+ JSR a_to_fifo_2
+
+
+
+.ca_from_fifo_2
+\
+ JSR a_from_fifo_2                      \ Receive C and A from host
+ ASL A
+
+
+
+.a_from_fifo_2
+\
+ FNtube_2_wait_get                      \ Receive A from host
+ LDA tube_2_data%
+\
+ RTS
+
+
+
+.a_to_fifo_2
+\
+ FNtube_2_wait_put                      \ Transmit A to host
+ STA tube_2_data%
+\
+ RTS
+
+
+
+.blk_to_fifo_2_ypl1                     \ Transmit block to host (down from Y to 0)
+\
+ TYA
+ TAX
+ INX
+\
+.blk_to_fifo_2                          \ Transmit block to host (down from Y, X bytes)
+\
+ LDA (tubos_genptr2),Y
+ FNtube_2_wait_put
+ STA tube_2_data%
+\
+ DEY
+ DEX
+ BNE blk_to_fifo_2
+\
+ RTS
+
+
+
+.blk_from_fifo_2_ypl1                   \ Receive block from host (down from Y to 0)
+\
+ TYA
+ TAX
+ INX
+\
+.blk_from_fifo_2                        \ Receive block from host (down from Y, X bytes)
+\
+ FNtube_2_wait_get
+ LDA tube_2_data%
+ STA (tubos_genptr2),Y
+\
+ DEY
+ DEX
+ BNE blk_from_fifo_2
+\
+ RTS
+
+
+
+.swrun_cli
+\
+ STX tubos_genptr1+0                    \ Command line to parse
+ STY tubos_genptr1+1
+\
+ LDY #&FF                               \ Skip leading spaces and '*'s
+\
+.swcli_skpld
+\
+ JSR parse_next_nosp
+\
+ CMP #ASC"*"
+ BEQ swcli_skpld
+\
+ LDX #&FF                               \ Check for known commands
+\
+ DEY
+ STY tubos_genva2a
+\
+ STZ tubos_genva2b
+\
+ BRA swcli_cmd_char
+\
+.swcli_cmd_next
+\
+ INX
+ LDA star_commands,X
+ BNE swcli_cmd_next
+\
+ LDY tubos_genva2a
+\
+ INC tubos_genva2b
+\
+.swcli_cmd_char
+\
+ INX
+\
+ LDA star_commands,X
+ BEQ swcli_cmd_match                    \ (whole command matched)
+ BPL swcli_pass_on                      \ (no more table entries)
+\
+ LSR A                                  \ (C set if '.' allowed)
+\
+ INY
+\
+ EOR (tubos_genptr1),Y
+ AND #&DF
+ BEQ swcli_cmd_char
+\
+ BCC swcli_cmd_next
+\
+ LDA (tubos_genptr1),Y
+ CMP #ASC"."
+ BNE swcli_cmd_next
+\
+ INY
+\
+ BRA swcli_cmd_ok
+\
+.swcli_cmd_match
+\
+ INY                                    \ (check for end-of-command)
+\
+ LDA (tubos_genptr1),Y
+\
+ AND #&DF
+ CMP #ASC"A"
+ BCC swcli_cmd_ok
+ CMP #ASC"Z"+1
+ BCC swcli_pass_on
+\
+.swcli_cmd_ok
+\
+ LDA tubos_genva2b                      \ Dispatch command code
+ BEQ swcli_x_help
+ CMP #1
+ BEQ swcli_x_gos
+\
+\
+\
+.swcli_x_go
+\
+ JSR parse_curr_nosp                    \ Parse (<hex value>)
+\
+ JSR parse_hex_value
+\
+ JSR parse_curr_nosp                    \ No more command arguments
+\
+ BNE swcli_pass_on                      \ (else pass on command line)
+\
+ TXA                                    \ Executable address indicated ?
+ BEQ swcli_does_run                     \ No, re-enter the current app
+\
+ LDA tubos_hexvalue+0                   \ Enter the indicated executable
+ STA tubos_transad+0
+ LDA tubos_hexvalue+1
+ STA tubos_transad+1
+\
+\
+\
+.swcli_does_run
+\
+ LDA tubos_running+1                    \ Remember current app
+ PHA
+ LDA tubos_running+0
+ PHA
+\
+ JSR running_executable_soft            \ Enter executable (tentatively)
+\
+ PLA                                    \ Restore previous app if executable returns
+ STA tubos_running+0
+ STA tubos_himem+0
+ PLA
+ STA tubos_running+1
+ STA tubos_himem+1
+\
+ RTS
+\
+\
+\
+.swcli_x_gos
+\
+ JMP hwrun_rst                          \ Enter the supervisor
+\
+\
+\
+.swcli_x_help
+\
+ JSR parse_curr_nosp                    \ No more command arguments
+\
+ BNE swcli_pass_on                      \ (else pass on command line)
+\
+ JSR display_string                     \ Display our 'help' message
+\
+ EQUB &0A:EQUB &0D
+ EQUS "65C02 TUBE " + `Source_Version$
+ EQUB &0A:EQUB &0D
+ NOP
+\
+\
+\
+.swcli_pass_on
+\
+ LDA #tubrc_oscli%                      \ Pass command line to host
+ JSR a_to_fifo_2
+\
+ JSR transmit_string_ptr1
+\
+\
+\
+.swcli_may_run
+\
+ JSR a_from_fifo_2                      \ Enter executable as a result ?
+ CMP #&80
+ BEQ swcli_does_run                     \ Yes, do so
+\
+ RTS
+
+
+
+.swrun_byte
+\
+ CMP #&80                               \ Perform OSBYTE
+ BCC swbyt_low
+\
+ CMP #&82                               \ ('Read machine high order address')
+ BEQ swbyt_82
+ CMP #&83                               \ ('Read top of OS RAM address (OSHWM)')
+ BEQ swbyt_83
+ CMP #&84                               \ ('Read bottom of display RAM address (HIMEM)')
+ BEQ swbyt_84
+\
+ PHA
+\
+ LDA #tubrc_osbyte_hi%
+ FNtube_2_wait_put
+ STA tube_2_data%
+\
+ FNtube_2_wait_put
+ STX tube_2_data%
+\
+ FNtube_2_wait_put
+ STY tube_2_data%
+\
+ PLA
+\
+ FNtube_2_wait_put
+ STA tube_2_data%
+\
+ CMP #&8E                               \ ('Enter language ROM')
+ BEQ swcli_may_run
+ CMP #&9D                               \ ('Fast Tube BPUT')
+ BEQ swbyt_done
+\
+ PHA
+\
+ FNtube_2_wait_get
+ LDA tube_2_data%
+ ASL A
+\
+ PLA
+\
+ FNtube_2_wait_get
+ LDY tube_2_data%
+\
+ FNtube_2_wait_get
+ LDX tube_2_data%
+\
+.swbyt_done
+\
+ RTS
+\
+.swbyt_82
+\
+ LDX #&00
+ LDY #&00
+\
+ RTS
+\
+.swbyt_83
+\
+ LDX #default_oshwm% MOD 256
+ LDY #default_oshwm% DIV 256
+\
+ RTS
+\
+.swbyt_84
+\
+ LDX tubos_himem+0
+ LDY tubos_himem+1
+\
+ RTS
+\
+.swbyt_low
+\
+ PHA
+\
+ LDA #tubrc_osbyte_lo%
+ FNtube_2_wait_put
+ STA tube_2_data%
+\
+ FNtube_2_wait_put
+ STX tube_2_data%
+\
+ PLA
+\
+ FNtube_2_wait_put
+ STA tube_2_data%
+\
+ FNtube_2_wait_get
+ LDX tube_2_data%
+\
+ RTS
+
+
+
+.swrun_word
+\
+ STX tubos_genptr2+0                    \ Perform OSWORD
+ STY tubos_genptr2+1
+\
+ PHA
+\
+ TAY                                    \ (0 is special)
+ BEQ swwor_zero
+\
+ LDY #tubrc_osword_nn%
+ FNtube_2_wait_put
+ STY tube_2_data%
+\
+ FNtube_2_wait_put
+ STA tube_2_data%
+\
+ TAX
+ BPL swwor_o_table
+\
+ LDY #0
+ LDA (tubos_genptr2),Y
+ TAY
+\
+ BRA swwor_o_sized
+\
+.swwor_o_table
+\
+ LDY osword_o_rc2size-1,X
+\
+ CPX #osword_o_rc2size_end - osword_o_rc2size + 1
+ BCC swwor_o_sized
+\
+ LDY #16
+\
+.swwor_o_sized
+\
+ FNtube_2_wait_put
+ STY tube_2_data%
+\
+ PHX
+\
+ DEY
+ BMI swwor_o_done
+\
+ JSR blk_to_fifo_2_ypl1
+\
+.swwor_o_done
+\
+ PLX
+ BPL swwor_i_table
+\
+ LDY #1
+ LDA (tubos_genptr2),Y
+ TAY
+\
+ BRA swwor_i_sized
+\
+.swwor_i_table
+\
+ LDY osword_i_rc2size-1,X
+\
+ CPX #osword_i_rc2size_end - osword_i_rc2size + 1
+ BCC swwor_i_sized
+\
+ LDY #16
+\
+.swwor_i_sized
+\
+ FNtube_2_wait_put
+ STY tube_2_data%
+\
+ DEY
+ BMI swwor_i_done
+\
+ JSR blk_from_fifo_2_ypl1
+\
+.swwor_i_done
+\
+ LDX tubos_genptr2+0
+ LDY tubos_genptr2+1
+\
+ PLA
+\
+ RTS
+\
+.swwor_zero
+\
+ LDA #tubrc_osword_00%
+ JSR a_to_fifo_2
+\
+ LDX #3
+ LDY #4
+ JSR blk_to_fifo_2
+\
+ LDA #&07                               \ (specify their, not our buffer)
+ JSR a_to_fifo_2
+ LDA #&00
+ JSR a_to_fifo_2
+\
+ JSR a_from_fifo_2
+ ASL A
+ BCS swwor_0_abort
+\
+ LDA (tubos_genptr2)                    \ (copy the string to our buffer)
+ STA tubos_genptr1+0
+ LDA (tubos_genptr2),Y
+ STA tubos_genptr1+1
+\
+ LDY #&FF
+\
+.swwor_0_ibyte
+\
+ INY
+\
+ FNtube_2_wait_get
+ LDA tube_2_data%
+ STA (tubos_genptr1),Y
+\
+ CMP #&0D
+ BNE swwor_0_ibyte
+\
+ LDX #0
+\
+ PLA
+\
+ CLC
+\
+ RTS
+\
+.swwor_0_abort
+\
+ LDX tubos_genptr2+0
+\
+ LDY #0
+\
+ PLA
+\
+ RTS
+
+
+
+.swrun_args
+\
+ PHY                                    \ Perform OSARGS
+ PHA
+\
+ STX tubos_genptr2+0
+ STZ tubos_genptr2+1
+\
+ LDA #tubrc_osargs%
+ JSR a_to_fifo_2
+\
+ FNtube_2_wait_put
+ STY tube_2_data%
+\
+ LDY #3
+ JSR blk_to_fifo_2_ypl1
+\
+ PLA
+\
+ JSR a_to_fifo_2
+\
+ JSR a_from_fifo_2
+\
+ PHA
+\
+ LDY #3
+ JSR blk_from_fifo_2_ypl1
+\
+ LDX tubos_genptr2+0
+\
+ PLA
+ PLY
+\
+ RTS
+
+
+
+.swrun_find
+\
+ PHA                                    \ Perform OSFIND
+\
+ LDA #tubrc_osfind%
+ JSR a_to_fifo_2
+\
+ PLA
+\
+ JSR a_to_fifo_2
+\
+ CMP #&00
+ BNE swfin_open
+\
+ PHA
+\
+ TYA
+ JSR a_to_fifo_2
+\
+ JSR a_from_fifo_2
+\
+ PLA
+\
+ RTS
+\
+.swfin_open
+\
+ JSR transmit_string_xy
+\
+ JMP a_from_fifo_2
+
+
+
+.swrun_bget
+\
+ LDA #tubrc_osbget%                     \ Perform OSBGET
+ JSR a_to_fifo_2
+\
+ TYA
+ JSR a_to_fifo_2
+\
+ JMP ca_from_fifo_2
+
+
+
+.swrun_bput
+\
+ PHA                                    \ Perform OSBPUT
+\
+ LDA #tubrc_osbput%
+ JSR a_to_fifo_2
+\
+ TYA
+ JSR a_to_fifo_2
+\
+ PLA
+\
+ JSR a_to_fifo_2
+\
+ PHA
+\
+ JSR a_from_fifo_2
+\
+ PLA
+\
+ RTS
+
+
+
+.swrun_file
+\
+ STX tubos_genptr2+0                    \ Perform OSFILE
+ STY tubos_genptr2+1
+\
+ PHA
+\
+ LDA #tubrc_osfile%
+ JSR a_to_fifo_2
+\
+ LDX #16
+ LDY #17
+ JSR blk_to_fifo_2
+\
+ LDA (tubos_genptr2)
+ TAX
+\
+ LDA (tubos_genptr2),Y
+ TAY
+\
+ JSR transmit_string_xy
+\
+ PLA
+\
+ JSR a_to_fifo_2
+\
+ JSR a_from_fifo_2
+\
+ PHA
+\
+ LDX #16
+ LDY #17
+ JSR blk_from_fifo_2
+\
+ LDX tubos_genptr2+0
+ LDY tubos_genptr2+1
+\
+ PLA
+\
+ RTS
+
+
+
+.swrun_gbpb
+\
+ STX tubos_genptr2+0                    \ Perform OSGBPB
+ STY tubos_genptr2+1
+\
+ PHA
+\
+ LDA #tubrc_osgbpb%
+ JSR a_to_fifo_2
+\
+ LDY #12
+ JSR blk_to_fifo_2_ypl1
+\
+ PLA
+\
+ JSR a_to_fifo_2
+\
+ LDY #12
+ JSR blk_from_fifo_2_ypl1
+\
+ LDX tubos_genptr2+0
+ LDY tubos_genptr2+1
+\
+ JMP ca_from_fifo_2
+
+
+
+.hwrun_int
+\
+ STA tubos_irqa                         \ Save 'IRQ A'
+\
+ PLA                                    \ BRK or IRQ ?
+ PHA
+ AND #1<<4
+ BNE hwint_is_brk                       \ BRK
+\
+ JMP (osvec_irq1%)                      \ IRQ
+
+
+
+.swrun_irq1
+\
+ BIT tube_4_flag%                       \ IRQ from 4 ?
+ BMI hwint_4_active                     \ Yes, handle
+\
+ BIT tube_1_flag%                       \ IRQ from 1 ?
+ BMI hwint_1_active                     \ Yes, handle
+\
+ JMP (osvec_irq2%)                      \ Relay unknown IRQ
+
+
+
+.hwint_is_brk
+\
+ PHX                                    \ Register 'last BRK'
+\
+ TSX
+ CLD
+ SEC
+ LDA &0101+1+1,X
+ SBC #&01
+ STA tubos_lastbrk+0
+ LDA &0101+1+2,X
+ SBC #&00
+ STA tubos_lastbrk+1
+\
+ PLX
+\
+ LDA tubos_irqa                         \ Relay to BRK handler
+\
+ CLI
+\
+ JMP (osvec_brk%)
+
+
+
+.hwint_1_active
+\
+ LDA tube_1_data%                       \ Incoming event ?
+ BMI hwin1_escape                       \ No, ESCAPE flag
+\
+ PHX                                    \ Relay to event handler
+ PHY
+\
+ JSR next_from_1
+ TAY
+\
+ JSR next_from_1
+ TAX
+\
+ JSR next_from_1
+\
+ JSR hwin1_event
+\
+ PLY
+ PLX
+\
+ LDA tubos_irqa
+\
+ RTI
+\
+.hwin1_event
+\
+ JMP (osvec_evnt%)
+\
+.hwin1_escape
+\
+ ASL A                                  \ Note new ESCAPE flag
+ STA tubos_escape
+\
+ LDA tubos_irqa
+\
+ RTI
+
+
+
+.hwint_4_active
+\
+ LDA tube_4_data%                       \ Incoming error ?
+ BPL hwin4_trans                        \ No, data transfer
+\
+ CLI                                    \ Copy error to BRK buffer
+\
+ JSR a_from_fifo_2
+\
+ STZ tubos_strbuf_first+0
+\
+ LDY #&FF
+\
+.hwin4_waich
+\
+ INY
+\
+ JSR a_from_fifo_2
+ STA tubos_strbuf_first+1,Y
+\
+ BNE hwin4_waich
+\
+ TYA
+ BEQ hwin4_waich                        \ (zero allowed for erno.)
+\
+ JMP tubos_strbuf_first                 \ Execute as BRK type error
+\
+.hwin4_trans
+\
+ PHX                                    \ Save used registers
+ PHY
+\
+ TAX                                    \ Transfer type
+\
+ LDA nmi_codptr_lo,X                    \ New processor NMI vector
+ STA hwvec_nmi+0
+ LDA nmi_codptr_hi,X
+ STA hwvec_nmi+1
+\
+ LDA nmi_traptr_lo,X                    \ Target of start address
+ STA tubos_nmiptrad+0
+ LDA nmi_traptr_hi,X
+ STA tubos_nmiptrad+1
+\
+ FNtube_4_wait_get                      \ Sync (for release)
+ LDA tube_4_data%
+\
+ CPX #&05                               \ Ready for 'release'
+ BEQ hwin4_finish
+\
+ LDY #mem_ptr_size% - 1                 \ Initialise transfer address
+\
+ FNtube_4_wait_get
+ LDA tube_4_data%
+\
+ FNtube_4_wait_get
+ LDA tube_4_data%
+\
+ FNtube_4_wait_get
+ LDA tube_4_data%
+ STA (tubos_nmiptrad),Y
+\
+ DEY
+\
+ FNtube_4_wait_get
+ LDA tube_4_data%
+ STA (tubos_nmiptrad),Y
+\
+ BIT tube_3_data%                       \ Empty H-to-P FIFO
+ BIT tube_3_data%
+\
+ FNtube_4_wait_get                      \ Sync (starts transfer)
+ LDA tube_4_data%
+\
+ CPX #&06                               \ Done if not polled I/O
+ BCC hwin4_finish                       \ (rest, if any, via NMI)
+\
+ BNE hwin4_7
+\
+ LDX #0                                 \ Perform type 6 transfer
+\
+.hwin4_6_byte
+\
+ BIT tube_3_flag%
+ BPL hwin4_6_byte
+\
+.nmi_6_ptr
+ LDA &FFFF,X
+ STA tube_3_data%
+\
+ INX
+ BNE hwin4_6_byte
+\
+ FNtube_3_wait_get
+ STA tube_3_data%
+\
+ BRA hwin4_finish
+\
+.hwin4_7
+\
+ LDX #0                                 \ Perform type 7 transfer
+\
+.hwin4_7_byte
+\
+ BIT tube_3_flag%
+ BPL hwin4_7_byte
+\
+ LDA tube_3_data%
+.nmi_7_ptr
+ STA &FFFF,X
+\
+ INX
+ BNE hwin4_7_byte
+\
+.hwin4_finish
+\
+ PLY                                    \ Restore used registers
+ PLX
+\
+ LDA tubos_irqa
+\
+ RTI
+
+
+
+.next_from_1
+\
+ BIT tube_1_flag%                       \ Receive next host byte on '1'
+ BMI nxin1_byte
+\
+ BIT tube_4_flag%                       \ (while giving way to IRQs on '4')
+ BPL next_from_1
+\
+ LDA tubos_irqa
+\
+ PHP
+ CLI
+ PLP
+\
+ STA tubos_irqa
+\
+ BRA next_from_1
+\
+.nxin1_byte
+\
+ LDA tube_1_data%
+\
+.swrun_inactive
+\
+ RTS
+
+
+
+.hwrun_nmi
+\
+ STA tube_3_data%                       \ Attempt to remove NMI cause
+\
+ RTI
+
+
+
+.nmi_0_cod                              \ total 35 [44] (worst), 30 [31] (best), +4 @ 14 MHz
+\
+ PHA                                    \ 3
+\
+.nmi_0_ptr
+ LDA &FFFF                              \ 4 [5]
+ STA tube_3_data%                       \ 4 ; +4 @ 14 MHz
+\
+ FNinc_mem_ptr(nmi_0_ptr+1)             \ 6+2+6[+2+6] (worst), 6+3 (best)
+\
+ PLA                                    \ 4
+\
+ RTI                                    \ 6
+
+
+
+.nmi_1_cod                              \ total 35 [44] (worst), 30 [31] (best), +4 @ 14 MHz
+\
+ PHA                                    \ 3
+\
+ LDA tube_3_data%                       \ 4 ; +4 @ 14 MHz
+.nmi_1_ptr
+ STA &FFFF                              \ 4 [5]
+\
+ FNinc_mem_ptr(nmi_1_ptr+1)             \ 6+2+6[+2+6] (worst), 6+3 (best)
+\
+ PLA                                    \ 4
+\
+ RTI                                    \ 6
+
+
+
+.nmi_2_cod                              \ total 55 [71] (worst), 51 [60] (best), +8 @ 14 MHz
+\
+ PHA                                    \ 3
+\
+ LDA (tubos_transad)                    \ 5 [6]
+ STA tube_3_data%                       \ 4 ; +4 @ 14 MHz
+\
+ FNinc_mem_ptr(tubos_transad)           \ 5+2+5[+2+5] (worst), 5+3 (best)
+\
+ LDA (tubos_transad)                    \ 5 [6]
+ STA tube_3_data%                       \ 4 ; +4 @ 14 MHz
+\
+ FNinc_mem_ptr(tubos_transad)           \ 5+2+5[+2+5] (worst), 5+3 (best)
+\
+ PLA                                    \ 4
+\
+ RTI                                    \ 6
+
+
+
+.nmi_3_cod                              \ total 55 [71] (worst), 51 [60] (best), +8 @ 14 MHz
+\
+ PHA                                    \ 3
+\
+ LDA tube_3_data%                       \ 4 ; +4 @ 14 MHz
+ STA (tubos_transad)                    \ 5 [6]
+\
+ FNinc_mem_ptr(tubos_transad)           \ 5+2+5[+2+5] (worst), 5+3 (best)
+\
+ LDA tube_3_data%                       \ 4 ; +4 @ 14 MHz
+ STA (tubos_transad)                    \ 5 [6]
+\
+ FNinc_mem_ptr(tubos_transad)           \ 5+2+5[+2+5] (worst), 5+3 (best)
+\
+ PLA                                    \ 4
+\
+ RTI                                    \ 6
+
+
+
+]
+
+IF P% > &FF00 THEN STOP
+
+D% = &FF00 - P%:P% += D%:O% += D%
+
+[OPT `P
+
+
+
+.std_swrun
+\
+ EQUW swrun_illegal     ; USR
+ EQUW swrun_brk         ; BRK
+ EQUW swrun_irq1        ; IRQ1
+ EQUW swrun_illegal     ; IRQ2
+ EQUW swrun_cli         ; CLI
+ EQUW swrun_byte        ; BYTE
+ EQUW swrun_word        ; WORD
+ EQUW swrun_wrch        ; WRCH
+ EQUW swrun_rdch        ; RDCH
+ EQUW swrun_file        ; FILE
+ EQUW swrun_args        ; ARGS
+ EQUW swrun_bget        ; BGET
+ EQUW swrun_bput        ; BPUT
+ EQUW swrun_gbpb        ; GBPB
+ EQUW swrun_find        ; FIND
+ EQUW swrun_illegal     ; FSC
+ EQUW swrun_inactive    ; EVNT
+ EQUW swrun_illegal     ; UPT
+ EQUW swrun_illegal     ; NET
+ EQUW swrun_illegal     ; VDU
+ EQUW swrun_illegal     ; KEY
+ EQUW swrun_illegal     ; INS
+ EQUW swrun_illegal     ; REM
+ EQUW swrun_illegal     ; CNP
+ EQUW swrun_inactive    ; IND1
+ EQUW swrun_inactive    ; IND2
+ EQUW swrun_inactive    ; IND3
+\
+.std_swrun_end
+
+
+
+.star_commands
+\
+ EQUB ASC"H" << 1 OR 0
+ EQUB ASC"E" << 1 OR 1
+ EQUB ASC"L" << 1 OR 1
+ EQUB ASC"P" << 1 OR 1
+ EQUB 0
+\
+ EQUB ASC"G" << 1 OR 0
+ EQUB ASC"O" << 1 OR 0
+ EQUB ASC"S" << 1 OR 0
+ EQUB 0
+\
+ EQUB ASC"G" << 1 OR 0
+ EQUB ASC"O" << 1 OR 0
+ EQUB 0
+\
+ EQUB 1
+
+
+
+.supervisor_osword_0
+\
+ EQUW tubos_strbuf_first
+\
+ EQUB tubos_strbuf_final + 1 - tubos_strbuf_first
+\
+ EQUB &20
+ EQUB &FF
+
+
+
+.osword_o_rc2size
+\
+ EQUB &00
+ EQUB &05
+ EQUB &00
+ EQUB &05
+ EQUB &04
+ EQUB &05
+ EQUB &08
+ EQUB &0E
+ EQUB &04
+ EQUB &01
+ EQUB &01
+ EQUB &05
+ EQUB &00
+ EQUB &08
+ EQUB &20
+ EQUB &10
+ EQUB &0D
+ EQUB &00
+ EQUB &04
+ EQUB &80
+\
+.osword_o_rc2size_end
+\
+.osword_i_rc2size
+\
+ EQUB &05
+ EQUB &00
+ EQUB &05
+ EQUB &00
+ EQUB &05
+ EQUB &00
+ EQUB &00
+ EQUB &00
+ EQUB &05
+ EQUB &09
+ EQUB &05
+ EQUB &00
+ EQUB &08
+ EQUB &18
+ EQUB &00
+ EQUB &01
+ EQUB &0D
+ EQUB &80
+ EQUB &04
+ EQUB &80
+\
+.osword_i_rc2size_end
+
+
+
+.nmi_traptr_lo
+\
+ EQUB (nmi_0_ptr+1) MOD 256
+ EQUB (nmi_1_ptr+1) MOD 256
+ EQUB tubos_transad MOD 256
+ EQUB tubos_transad MOD 256
+ EQUB tubos_transad MOD 256
+ EQUB tubos_transad MOD 256
+ EQUB (nmi_6_ptr+1) MOD 256
+ EQUB (nmi_7_ptr+1) MOD 256
+\
+.nmi_traptr_hi
+\
+ EQUB (nmi_0_ptr+1) DIV 256
+ EQUB (nmi_1_ptr+1) DIV 256
+ EQUB tubos_transad DIV 256
+ EQUB tubos_transad DIV 256
+ EQUB tubos_transad DIV 256
+ EQUB tubos_transad DIV 256
+ EQUB (nmi_6_ptr+1) DIV 256
+ EQUB (nmi_7_ptr+1) DIV 256
+\
+.nmi_codptr_lo
+\
+ EQUB nmi_0_cod MOD 256
+ EQUB nmi_1_cod MOD 256
+ EQUB nmi_2_cod MOD 256
+ EQUB nmi_3_cod MOD 256
+ EQUB hwrun_nmi MOD 256
+ EQUB hwrun_nmi MOD 256
+ EQUB hwrun_nmi MOD 256
+ EQUB hwrun_nmi MOD 256
+\
+.nmi_codptr_hi
+\
+ EQUB nmi_0_cod DIV 256
+ EQUB nmi_1_cod DIV 256
+ EQUB nmi_2_cod DIV 256
+ EQUB nmi_3_cod DIV 256
+ EQUB hwrun_nmi DIV 256
+ EQUB hwrun_nmi DIV 256
+ EQUB hwrun_nmi DIV 256
+ EQUB hwrun_nmi DIV 256
+
+
+
+.escape_if_c
+\
+ BCS escape_error                       \ If ESCAPE detected, handle
+\
+ RTS
+\
+.escape_error
+\
+ LDA #&7E                               \ Acknowledge ESCAPE
+ JSR os_byte%
+\
+ BRK                                    \ Generate ESCAPE error
+ EQUB 17
+ EQUS "Escape"
+ EQUB 0
+
+
+
+.swrun_illegal
+\
+ BRK
+ EQUB 255
+ EQUS "Bad"
+ EQUB 0
+
+
+
+]
+
+IF P% > &FFB3 THEN STOP
+
+D% = &FFB3 - P%:P% += D%:O% += D%
+
+[OPT `P
+
+
+
+.os_wrsc%
+\
+ JMP swrun_illegal
+\
+.os_defv%
+\
+ EQUB std_swrun_end - std_swrun
+ EQUW std_swrun
+\
+.os_rdsc%
+\
+ JMP swrun_illegal
+\
+.os_rvdu%
+\
+ JMP swrun_illegal
+\
+.os_even%
+\
+ JMP swrun_illegal
+\
+.gs_init%
+\
+ JMP swrun_illegal
+\
+.gs_read%
+\
+ JMP swrun_illegal
+\
+.nv_rdch%
+\
+ JMP swrun_rdch
+\
+.nv_wrch%
+\
+ JMP swrun_wrch
+\
+.os_find%
+\
+ JMP (osvec_find%)
+\
+.os_gbpb%
+\
+ JMP (osvec_gbpb%)
+\
+.os_bput%
+\
+ JMP (osvec_bput%)
+\
+.os_bget%
+\
+ JMP (osvec_bget%)
+\
+.os_args%
+\
+ JMP (osvec_args%)
+\
+.os_file%
+\
+ JMP (osvec_file%)
+\
+.os_rdch%
+\
+ JMP (osvec_rdch%)
+\
+.os_asci%
+\
+ CMP #&0D
+ BNE os_wrch%
+\
+.os_newl%
+\
+ LDA #&0A
+ JSR os_wrch%
+ LDA #&0D
+\
+.os_wrch%
+\
+ JMP (osvec_wrch%)
+\
+.os_word%
+\
+ JMP (osvec_word%)
+\
+.os_byte%
+\
+ JMP (osvec_byte%)
+\
+.os_cli%
+\
+ JMP (osvec_cli%)
+
+
+
+.hwvec_nmi
+\
+ EQUW hwrun_nmi
+\
+.hwvec_rst
+\
+ EQUW rom_boot%
+\
+.hwvec_int
+\
+ EQUW hwrun_int
+
+
+
+]
+
+IF P% <> &10000 THEN STOP
+
+ENDPROC
+
+
+
+DEFFNtube_1_wait_put
+
+= FNtube_wait_put(tube_1_flag%)
+
+
+
+DEFFNtube_2_wait_get
+
+= FNtube_wait_get(tube_2_flag%)
+
+
+
+DEFFNtube_2_wait_put
+
+= FNtube_wait_put(tube_2_flag%)
+
+
+
+DEFFNtube_3_wait_get
+
+= FNtube_wait_get(tube_3_flag%)
+
+
+
+DEFFNtube_4_wait_get
+
+= FNtube_wait_get(tube_4_flag%)
+
+
+
+DEFFNtube_wait_get(tube_flag%)
+
+[OPT `P
+\
+ BIT tube_flag%
+ BPL P% - 3
+\
+]
+
+= 0
+
+
+
+DEFFNtube_wait_put(tube_flag%)
+
+[OPT `P
+\
+ BIT tube_flag%
+ BVC P% - 3
+\
+]
+
+= 0
+
+
+
+DEFFNinc_mem_ptr(mem_ptr_addr%)
+
+LOCAL inc_done%
+
+inc_done% = P%
+
+[OPT `P:INC mem_ptr_addr%+0:]
+
+inc_done% = P% - inc_done%
+
+inc_done% = P% + (mem_ptr_size% - 1) * (2 + inc_done%)
+
+FOR B% = 1 TO mem_ptr_size% - 1
+
+[OPT `P:BNE inc_done%:INC mem_ptr_addr%+B%:]
+
+NEXT
+
+= 0
+
+
+

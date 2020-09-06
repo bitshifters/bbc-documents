@@ -1,0 +1,940 @@
+10REM >Client/src
+20REM Source for 6502 Tube Client
+30REM As supplied with External 6502 Second Processor
+40REM Code copyright Acorn Computer
+50REM Commentary copyright J.G.Harston
+60:
+70IF PAGE>&8000:LOADATN "OS_GetEnv"TOA$:IFLEFT$(A$,5)<>"B6502":OSCLI"B6502"+MID$(A$,INSTR(A$," "))
+80:
+90load%=&F800:DIM mcode% &900
+100:
+110USERV=&200: BRKV=&202:IRQ1V=&204:IRQ2V=&206
+120 CLIV=&208:BYTEV=&20A:WORDV=&20C:WRCHV=&20E
+130RDCHV=&210:FILEV=&212:ARGSV=&214:BGetV=&216
+140BPutV=&218:GBPBV=&21A:FINDV=&21C: FSCV=&21E
+150EVNTV=&220: UPTV=&222: NETV=&224: VduV=&226
+160 KEYV=&228: INSV=&22A: RemV=&22C: CNPV=&22E
+170IND1V=&230:IND2V=&232:IND3V=&234
+180:
+190ERRBUF=&236:INPBUF=&236
+200:
+210:
+220REM Memory addresses:
+230REM &EE/F = PROG   - Current program
+240REM &F0/1 = NUM    - hex accumulator
+250REM &F2/3 = MEMTOP - top of memory
+260REM &F4/5 = address of byte transfer address, NMIAddr or ADDR
+270REM &F6/7 = ADDR   - Data transfer address
+280REM &F8/9 = String pointer, OSWORD control block
+290REM &FA/B = CTRL   - OSFILE, OSGBPB control block, PrText string pointer
+300REM &FC   = IRQ A store
+310REM &FD/E => last error
+320REM &FF   = Escape flag
+330:
+340FOR P=0TO1
+350P%=load%:O%=mcode%
+360[OPT P*3+4
+370.RESET
+380LDX #&00
+390.LF802
+400LDA &FF00,X:STA &FF00,X    :\ Copy entry block to RAM
+410DEX:BNE LF802
+420LDX #&36
+430.LF80D
+440LDA LFF80,X:STA USERV,X    :\ Set up default vectors
+450DEX:BPL LF80D
+460TXS:LDX #&F0               :\ Clear stack
+470.LF819
+480LDA &FDFF,X:STA &FDFF,X    :\ Copy &FE00-&FEEF to RAM, avoiding
+490DEX:BNE LF819              :\  Tube registers at &FEFx
+500LDY #RESET AND 255:STY &F8 :\ Point to start of ROM
+510LDA #RESET DIV 256:STA &F9
+520.LF82A                     :\ Copy rest of ROM to RAM
+530LDA (&F8),Y:STA (&F8),Y    :\ Copy a page to RAM
+540INY:BNE LF82A              :\ Loop for 256 bytes
+550INC &F9:LDA &F9            :\ Inc. address high byte
+560CMP #&FE:BNE LF82A         :\ Loop from &F800 to &FDFF
+570LDX #&10
+580.LF83B
+590LDA LF859,X:STA &0100,X    :\ Copy jump code to &100
+600DEX:BPL LF83B
+610LDA &EE:STA &F6            :\ Copy &EE/F to &F6/7
+620LDA &EF:STA &F7
+630LDA #&00:STA &FF           :\ Clear Escape flag
+640STA &F2:LDA #&F8:STA &F3   :\ Set memtop to start of ROM at &F800
+650JMP &0100                  :\ Jump via low memory to page ROM out
+660
+670\ Executed in low memory to page ROM out
+680\ --------------------------------------
+690.LF859
+700LDA TubeS1:CLI             :\ Check Tube R1 status to page ROM out
+710.LF85D
+720JMP LF860                  :\ Jump to initilise I/O with banner
+730
+740.LF860
+750JSR PrText                 :\ Display startup banner
+760EQUB 10:EQUS "Acorn TUBE 6502 64K"
+770EQUB 10:EQUB 10:EQUB 13:EQUB 0
+780NOP
+790LDA #CmdOSLoop AND 255     :\ Next time RESET is soft entered,
+800STA LF85D+1                :\ banner not printed
+810LDA #CmdOSLoop DIV 256
+820STA LF85D+2
+830JSR WaitByte               :\ Wait for Acknowledge
+840CMP #&80:BEQ EnterCode     :\ If &80, jump to enter code
+850                           :\ Otherwise, enter command prompt loop
+860
+870\ Minimal Command prompt
+880\ ======================
+890.CmdOSLoop
+900LDA #ASC"*":JSR OSWRCH     :\ Print '*' prompt
+910LDX #LF95D AND 255
+920LDY #LF95D DIV 256
+930LDA #&00:JSR OSWORD        :\ Read line to INPBUF
+940BCS CmdOSEscape
+950LDX #INPBUF AND 255
+960LDY #INPBUF DIV 256        :\ Execute command
+970JSR OS_CLI:JMP CmdOSLoop   :\  and loop back for another
+980.CmdOSEscape
+990LDA #&7E:JSR OSBYTE        :\ Acknowledge Escape state
+1000BRK:EQUB 17:EQUS "Escape":BRK
+1010
+1020
+1030\ Enter Code pointer to by &F6/7
+1040\ ==============================
+1050\ Checks to see if code has a ROM header, and verifies
+1060\ it if it has
+1070.EnterCode
+1080LDA &F6:STA &EE:STA &F2    :\ Set current program and memtop
+1090LDA &F7:STA &EF:STA &F3    :\  to address beng entered
+1100LDY #&07:LDA (&EE),Y       :\ Get copyright offset
+1110CLD:CLC:ADC &EE:STA &FD
+1120LDA #&00:ADC &EF:STA &FE   :\ &FD/E=>copyright message
+1130\
+1140\ Now check for &00,"(C)"
+1150LDY #&00:LDA (&FD),Y:BNE LF8FA     :\ Jump if no initial &00
+1160INY:LDA (&FD),Y:CMP #&28:BNE LF8FA :\ Jump if no '('
+1170INY:LDA (&FD),Y:CMP #&43:BNE LF8FA :\ Jump if no 'C'
+1180INY:LDA (&FD),Y:CMP #&29:BNE LF8FA :\ Jump if no ')'
+1190\
+1200\ &00,"(C)" exists
+1210LDY #&06:LDA (&EE),Y               :\ Get ROM type
+1220AND #&4F:CMP #&40:BCC NotLanguage  :\ b6=0, not a language
+1230AND #&0D:BNE Not6502Code           :\ type<>0 and <>2, not 6502 code
+1240.LF8FA
+1250LDA #&01:JMP (&00F2)               :\ Enter code with A=1
+1260\
+1270\ Any existing error handler will probably have been overwritten
+1280\ Set up new error handler before generating an error
+1290.NotLanguage
+1300LDA #ErrorHandler AND 255:STA BRKV+0 :\ Claim error handler
+1310LDA #ErrorHandler DIV 256:STA BRKV+1
+1320BRK:EQUB 0:EQUS "This is not a language":EQUB 0
+1330
+1340.Not6502Code
+1350LDA #ErrorHandler AND 255:STA BRKV+0 :\ Claim error handler
+1360LDA #ErrorHandler DIV 256:STA BRKV+1
+1370BRK:EQUB 0:EQUS "I cannot run this code":EQUB 0
+1380
+1390.ErrorHandler
+1400LDX #&FF:TXS               :\ Clear stack
+1410JSR OSNEWL:LDY #&01
+1420.LF94D
+1430LDA (&FD),Y:BEQ LF957      :\ Print error string
+1440JSR OSWRCH:INY:BNE LF94D
+1450.LF957
+1460JSR OSNEWL:JMP CmdOSLoop   :\ Jump to command prompt
+1470
+1480\ Control block for command prompt input
+1490\ --------------------------------------
+1500.LF95D
+1510EQUW INPBUF                :\ Input text to INPBUF at &236
+1520EQUB &CA                   :\ Up to &CA characters
+1530EQUB &20:EQUB &FF          :\ Min=&20, Max=&FF
+1540
+1550
+1560\ MOS INTERFACE
+1570\ =============
+1580\
+1590\
+1600\ OSWRCH - Send character to output stream
+1610\ ========================================
+1620\ On entry, A =character
+1630\ On exit,  A =preserved
+1640\
+1650\ Tube data  character  --
+1660\
+1670.osWRCH
+1680BIT TubeS1                 :\ Read Tube R1 status
+1690NOP:BVC osWRCH             :\ Loop until b6 set
+1700STA TubeR1:RTS             :\ Send character to Tube R1
+1710
+1720
+1730\ OSRDCH - Wait for character from input stream
+1740\ =============================================
+1750\ On exit, A =char, Cy=Escape flag
+1760\
+1770\ Tube data  &00  --  Carry Char
+1780\
+1790.osRDCH
+1800LDA #&00:JSR SendCommand   :\ Send command &00 - OSRDCH
+1810.WaitCarryChar             :\ Wait for Carry and A
+1820JSR WaitByte:ASL A         :\ Wait for carry
+1830.WaitByte
+1840BIT TubeS2:BPL WaitByte    :\ Loop until Tube R2 has data
+1850LDA TubeR2                 :\ Fetch character
+1860.NullReturn
+1870RTS
+1880
+1890
+1900\ Skip Spaces
+1910\ ===========
+1920.SkipSpaces1
+1930INY
+1940.SkipSpaces
+1950LDA (&F8),Y:CMP #&20:BEQ SkipSpaces1
+1960RTS
+1970
+1980
+1990\ Scan hex
+2000\ ========
+2010.ScanHex
+2020LDX #&00:STX &F0:STX &F1   :\ Clear hex accumulator
+2030.LF98C
+2040LDA (&F8),Y                :\ Get current character
+2050CMP #&30:BCC LF9B1         :\ <'0', exit
+2060CMP #&3A:BCC LF9A0         :\ '0'..'9', add to accumulator
+2070AND #&DF:SBC #&07:BCC LF9B1:\ Convert letter, if <'A', exit
+2080CMP #&40:BCS LF9B1         :\ >'F', exit
+2090.LF9A0
+2100ASL A:ASL A:ASL A:ASL A    :\ *16
+2110LDX #&03                   :\ Prepare to move 3+1 bits
+2120.LF9A6
+2130ASL A:ROL &F0:ROL &F1      :\ Move bits into accumulator
+2140DEX:BPL LF9A6              :\ Loop for four bits, no overflow check
+2150INY:BNE LF98C              :\ Move to next character
+2160.LF9B1
+2170RTS
+2180
+2190
+2200\ Send string to Tube R2
+2210\ ======================
+2220.SendString
+2230STX &F8:STY &F9            :\ Set &F8/9=>string
+2240.SendStringF8
+2250LDY #&00
+2260.LF9B8
+2270BIT TubeS2:BVC LF9B8       :\ Wait for Tube R2 free
+2280LDA (&F8),Y:STA TubeR2     :\ Send character to Tube R2
+2290INY:CMP #&0D:BNE LF9B8     :\ Loop until <cr> sent
+2300LDY &F9:RTS                :\ Restore Y from &F9 and return
+2310
+2320
+2330\ OSCLI - Execute command
+2340\ =======================
+2350\ On entry, XY=>command string
+2360\ On exit,  XY= preserved
+2370\
+2380.osCLI
+2390PHA:STX &F8:STY &F9        :\ Save A, &F8/9=>command string
+2400LDY #&00
+2410.LF9D1
+2420JSR SkipSpaces:INY
+2430CMP #ASC"*":BEQ LF9D1      :\ Skip spaces and stars
+2440AND #&DF:TAX               :\ Ignore case, and save in X
+2450LDA (&F8),Y                :\ Get next character
+2460CPX #ASC"G":BEQ CmdGO      :\ Jump to check '*GO'
+2470CPX #ASC"H":BNE osCLI_IO   :\ Not "H---", jump to pass to Tube
+2480CMP #ASC".":BEQ CmdHELP    :\ "H.", jump to do *DELETEHIMEM
+2490AND #&DF                   :\ Ignore case
+2500CMP #ASC"E":BNE osCLI_IO   :\ Not "HE---", jump to pass to Tube
+2510INY:LDA (&F8),Y            :\ Get next character
+2520CMP #ASC".":BEQ CmdHELP    :\ "HE.", jump to do *DELETEHIMEM
+2530AND #&DF                   :\ Ignore case
+2540CMP #ASC"L":BNE osCLI_IO   :\ Not "HEL---", jump to pass to Tube
+2550INY:LDA (&F8),Y            :\ Get next character
+2560CMP #ASC".":BEQ CmdHELP    :\ "HEL.", jump to do *DELETEHIMEM
+2570AND #&DF                   :\ Ignore case
+2580CMP #ASC"P":BNE osCLI_IO   :\ Not "HELP---", jump to pass to Tube
+2590INY:LDA (&F8),Y            :\ Get next character
+2600AND #&DF                   :\ Ignore case
+2610CMP #ASC"A":BCC CmdHELP    :\ "HELP" terminated by non-letter, do *DELETEHIMEM
+2620CMP #ASC"[":BCC osCLI_IO   :\ "HELP" followed by letter, pass to Tube
+2630
+2640\ *Help - Display help information
+2650\ --------------------------------
+2660.CmdHELP
+2670JSR PrText                 :\ Print help message
+2680EQUB 10:EQUB 13:EQUS "6502 TUBE 1.10"
+2690EQUB 10:EQUB 13
+2700NOP                        :\ Continue to pass '*DELETEHIMEM' command to Tube
+2710
+2720
+2730\ OSCLI - Send command line to host
+2740\ =================================
+2750\ On entry, &F8/9=>command string
+2760\
+2770\ Tube data  &02 string &0D  --  &7F or &80
+2780\
+2790.osCLI_IO
+2800LDA #&02:JSR SendCommand   :\ Send command &02 - OSCLI
+2810JSR SendStringF8           :\ Send command string at &F8/9
+2820.osCLI_Ack
+2830JSR WaitByte               :\ Wait for acknowledgement
+2840CMP #&80:BEQ LFA5C         :\ Jump if code to be entered
+2850PLA:RTS                    :\ Restore A and return
+2860
+2870
+2880\ *GO - call machine code
+2890\ -----------------------
+2900.CmdGO
+2910AND #&DF                   :\ Ignore case
+2920CMP #ASC"O":BNE osCLI_IO   :\ Not '*GO', jump to pass to Tube
+2930JSR SkipSpaces1            :\ Move past any spaces
+2940JSR ScanHex:JSR SkipSpaces :\ Read hex value and move past spaces
+2950CMP #&0D:BNE osCLI_IO      :\ More parameters, pass to Tube to deal with
+2960TXA:BEQ LFA5C              :\ If no address given, jump to current program
+2970LDA &F0:STA &F6            :\ Set program start to address read
+2980LDA &F1:STA &F7
+2990
+3000.LFA5C
+3010LDA &EF:PHA:LDA &EE:PHA    :\ Save current program
+3020JSR EnterCode
+3030PLA:STA &EE:STA &F2        :\ Restore current program and
+3040PLA:STA &EF:STA &F3        :\  set address top of memory to it
+3050PLA:RTS
+3060
+3070.CheckAck
+3080BEQ osCLI_Ack
+3090
+3100
+3110\ OSBYTE - Byte MOS functions
+3120\ ===========================
+3130\ On entry, A, X, Y=OSBYTE parameters
+3140\ On exit,  A  preserved
+3150\           If A<&80, X=returned value
+3160\           If A>&7F, X, Y, Carry=returned values
+3170\
+3180.osBYTE
+3190CMP #&80:BCS ByteHigh      :\ Jump for long OSBYTEs
+3200\
+3210\ Tube data  &04 X A    --  X
+3220\
+3230PHA:LDA #&04
+3240.LFA7A
+3250BIT TubeS2:BVC LFA7A       :\ Wait for Tube R2 free
+3260STA TubeR2                 :\ Send command &04 - OSBYTELO
+3270.LFA82
+3280BIT TubeS2:BVC LFA82       :\ Wait for Tube R2 free
+3290STX TubeR2:PLA             :\ Send single parameter
+3300.LFA8B
+3310BIT TubeS2:BVC LFA8B       :\ Wait for Tube R2 free
+3320STA TubeR2                 :\ Send function
+3330.LFA93
+3340BIT TubeS2:BPL LFA93       :\ Wait for Tube R2 data present
+3350LDX TubeR2:RTS             :\ Get return value
+3360
+3370.ByteHigh
+3380CMP #&82:BEQ Byte82        :\ Read memory high word
+3390CMP #&83:BEQ Byte83        :\ Read bottom of memory
+3400CMP #&84:BEQ Byte84        :\ Read top of memory
+3410\
+3420\ Tube data  &06 X Y A  --  Cy Y X
+3430\
+3440PHA:LDA #&06
+3450.LFAAB
+3460BIT TubeS2:BVC LFAAB       :\ Wait for Tube R2 free
+3470STA TubeR2                 :\ Send command &06 - OSBYTEHI
+3480.LFAB3
+3490BIT TubeS2:BVC LFAB3       :\ Wait for Tube R2 free
+3500STX TubeR2                 :\ Send parameter 1
+3510.LFABB
+3520BIT TubeS2:BVC LFABB       :\ Wait for Tube R2 free
+3530STY TubeR2                 :\ Send parameter 2
+3540PLA
+3550.LFAC4
+3560BIT TubeS2:BVC LFAC4       :\ Wait for Tube R2 free
+3570STA TubeR2                 :\ Send function
+3580CMP #&8E:BEQ CheckAck      :\ If select language, check to enter code
+3590CMP #&9D:BEQ LFAEF         :\ Fast return with Fast BPUT
+3600PHA                        :\ Save function
+3610.LFAD5
+3620BIT TubeS2:BPL LFAD5       :\ Wait for Tube R2 data present
+3630LDA TubeR2:ASL A:PLA       :\ Get Carry
+3640.LFADF
+3650BIT TubeS2:BPL LFADF       :\ Wait for Tube R2 data present
+3660LDY TubeR2                 :\ Get return high byte
+3670.LFAE7
+3680BIT TubeS2:BPL LFAE7       :\ Wait for Tube R2 data present
+3690LDX TubeR2                 :\ Get return low byte
+3700.LFAEF
+3710RTS
+3720
+3730.Byte84:LDX &F2:LDY &F3:RTS   :\ Read top of memory from &F2/3
+3740.Byte83:LDX #&00:LDY #&08:RTS :\ Read bottom of memory
+3750.Byte82:LDX #&00:LDY #&00:RTS :\ Return &0000 as memory high word
+3760
+3770
+3780\ OSWORD - Various functions
+3790\ ==========================
+3800\ On entry, A =function
+3810\           XY=>control block
+3820\
+3830.osWORD
+3840STX &F8:STY &F9            :\ &F8/9=>control block
+3850TAY:BEQ RDLINE             :\ OSWORD 0, jump to read line
+3860PHA:LDY #&08
+3870.LFB09
+3880BIT TubeS2:BVC LFB09       :\ Loop until Tube R2 free
+3890STY TubeR2                 :\ Send command &08 - OSWORD
+3900.LFB11
+3910BIT TubeS2:BVC LFB11       :\ Loop until Tube R2 free
+3920STA TubeR2                 :\ Send function
+3930TAX:BPL WordSendLow        :\ Jump with functions<&80
+3940LDY #&00:LDA (&F8),Y       :\ Get send block length from control block
+3950TAY:JMP WordSend           :\ Jump to send control block
+3960
+3970.WordSendLow
+3980LDY WordLengthsLo-1,X      :\ Get send block length from table
+3990CPX #&15:BCC WordSend      :\ Use this length for OSWORD 1 to &14
+4000LDY #&10                   :\ Send 16 bytes for OSWORD &15 to &7F
+4010.WordSend
+4020BIT TubeS2:BVC WordSend    :\ Wait until Tube R2 free
+4030STY TubeR2                 :\ Send send block length
+4040DEY:BMI LFB45              :\ Zero or &81..&FF length, nothing to send
+4050.LFB38
+4060BIT TubeS2:BVC LFB38       :\ Wait for Tube R2 free
+4070LDA (&F8),Y:STA TubeR2     :\ Send byte from control block
+4080DEY:BPL LFB38              :\ Loop for number to be sent
+4090.LFB45
+4100TXA:BPL WordRecvLow        :\ Jump with functions<&80
+4110LDY #&01:LDA (&F8),Y       :\ Get receive block length from control block
+4120TAY:JMP WordRecv           :\ Jump to receive control block
+4130
+4140.WordRecvLow
+4150LDY WordLengthsHi-1,X      :\ Get receive length from table
+4160CPX #&15:BCC WordRecv      :\ Use this length for OSWORD 1 to &14
+4170LDY #&10                   :\ Receive 16 bytes for OSWORD &15 to &7F
+4180.WordRecv
+4190BIT TubeS2:BVC WordRecv    :\ Wait for Tube R2 free
+4200STY TubeR2                 :\ Send receive block length
+4210DEY:BMI LFB71              :\ Zero of &81..&FF length, nothing to receive
+4220.LFB64
+4230BIT TubeS2:BPL LFB64       :\ Wait for Tube R2 data present
+4240LDA TubeR2:STA (&F8),Y     :\ Get byte to control block
+4250DEY:BPL LFB64              :\ Loop for number to receive
+4260.LFB71
+4270LDY &F9:LDX &F8:PLA        :\ Restore registers
+4280RTS
+4290
+4300
+4310\ RDLINE - Read a line of text
+4320\ ============================
+4330\ On entry, A =0
+4340\           XY=>control block
+4350\ On exit,  A =undefined
+4360\           Y =length of returned string
+4370\           Cy=0 ok, Cy=1 Escape
+4380\
+4390\ Tube data  &0A block  --  &FF or &7F string &0D
+4400\
+4410.RDLINE
+4420LDA #&0A:JSR SendCommand   :\ Send command &0A - RDLINE
+4430LDY #&04
+4440.LFB7E
+4450BIT TubeS2:BVC LFB7E       :\ Wait for Tube R2 free
+4460LDA (&F8),Y:STA TubeR2     :\ Send control block
+4470DEY:CPY #&01:BNE LFB7E     :\ Loop for 4, 3, 2
+4480LDA #&07:JSR SendByte      :\ Send &07 as address high byte
+4490LDA (&F8),Y:PHA            :\ Get text buffer address high byte
+4500DEY
+4510.LFB96
+4520BIT TubeS2:BVC LFB96       :\ Wait for Tube R2 free
+4530STY TubeR2                 :\ Send &00 as address low byte
+4540LDA (&F8),Y:PHA            :\ Get text buffer address low byte
+4550LDX #&FF:JSR WaitByte      :\ Wait for response
+4560CMP #&80:BCS RdLineEscape  :\ Jump if Escape returned
+4570PLA:STA &F8:PLA:STA &F9    :\ Set &F8/9=>text buffer
+4580LDY #&00
+4590.RdLineLp
+4600BIT TubeS2:BPL RdLineLp    :\ Wait for Tube R2 data present
+4610LDA TubeR2:STA (&F8),Y     :\ Store returned character
+4620INY:CMP #&0D:BNE RdLineLp  :\ Loop until <cr>
+4630LDA #&00:DEY:CLC:INX       :\ Return A=0, Y=len, X=00, Cy=0
+4640RTS
+4650:
+4660.RdLineEscape
+4670PLA:PLA:LDA #&00           :\ Return A=0, Y=len, X=FF, Cy=1
+4680RTS
+4690
+4700
+4710\ OSARGS - Read info on open file
+4720\ ===============================
+4730\ On entry, A =function
+4740\           X =>data word in zero page
+4750\           Y =handle
+4760\ On exit,  A =returned value
+4770\           X  preserved
+4780\           Y  preserved
+4790\
+4800\ Tube data  &0C handle block function  --  result block
+4810\
+4820.osARGS
+4830PHA:LDA #&0C:JSR SendCommand :\ Send command &0C - OSARGS
+4840.LFBD2
+4850BIT TubeS2:BVC LFBD2       :\ Loop until Tube R2 free
+4860STY TubeR2                 :\ Send handle
+4870LDA &03,X:JSR SendByte     :\ Send data word
+4880LDA &02,X:JSR SendByte
+4890LDA &01,X:JSR SendByte
+4900LDA &00,X:JSR SendByte
+4910PLA:JSR SendByte           :\ Send function
+4920JSR WaitByte:PHA           :\ Get and save result
+4930JSR WaitByte:STA &03,X     :\ Receive data word
+4940JSR WaitByte:STA &02,X
+4950JSR WaitByte:STA &01,X
+4960JSR WaitByte:STA &00,X
+4970PLA:RTS                    :\ Get result back and return
+4980
+4990
+5000\ OSFIND - Open of Close a file
+5010\ =============================
+5020\ On entry, A =function
+5030\           Y =handle or XY=>filename
+5040\ On exit,  A =zero or handle
+5050\
+5060\ Tube data  &12 function string &0D  --  handle
+5070\            &12 &00 handle  --  &7F
+5080\
+5090.osFIND
+5100PHA:LDA #&12:JSR SendCommand :\ Send command &12 - OSFIND
+5110PLA:JSR SendByte             :\ Send function
+5120CMP #&00:BNE OPEN            :\ If <>0, jump to do OPEN
+5130PHA:TYA:JSR SendByte         :\ Send handle
+5140JSR WaitByte:PLA:RTS         :\ Wait for acknowledge, restore regs and return
+5150.OPEN
+5160JSR SendString               :\ Send pathname
+5170JMP WaitByte                 :\ Wait for and return handle
+5180
+5190
+5200\ OSBGet - Get a byte from open file
+5210\ ==================================
+5220\ On entry, H =handle
+5230\ On exit,  A =byte Read
+5240\           H =preserved
+5250\           Cy set if EOF
+5260\
+5270\ Tube data  &0E handle --  Carry byte
+5280\
+5290.osBGET
+5300LDA #&0E:JSR SendCommand   :\ Send command &0E - OSBGET
+5310TYA:JSR SendByte           :\ Send handle
+5320JMP WaitCarryChar          :\ Jump to wait for Carry and byte
+5330
+5340
+5350\ OSBPut - Put a byte to an open file
+5360\ ===================================
+5370\ On entry, A =byte to write
+5380\           Y =handle
+5390\ On exit,  A =preserved
+5400\           Y =preserved
+5410\
+5420\ Tube data  &10 handle byte  --  &7F
+5430\
+5440.osBPUT
+5450PHA:LDA #&10:JSR SendCommand :\ Send command &10 - OSBPUT
+5460TYA:JSR SendByte             :\ Send handle
+5470PLA:JSR SendByte             :\ Send byte
+5480PHA:JSR WaitByte:PLA:RTS     :\ Wait for acknowledge and return
+5490
+5500
+5510\ Send a byte to Tube R2
+5520\ ======================
+5530.SendCommand
+5540.SendByte
+5550BIT TubeS2:BVC SendByte    :\ Wait for Tube R2 free
+5560STA TubeR2:RTS             :\ Send byte to Tube R2
+5570
+5580
+5590\ OSFILE - Operate on whole files
+5600\ ===============================
+5610\ On entry, A =function
+5620\           XY=>control block
+5630\ On exit,  A =result
+5640\           control block updated
+5650\
+5660\ Tube data  &14 block string <cr> function  --  result block
+5670\
+5680.osFILE
+5690STY &FB:STX &FA              :\ &FA/B=>control block
+5700PHA:LDA #&14:JSR SendCommand :\ Send command &14 - OSFILE
+5710LDY #&11
+5720.LFC5F
+5730LDA (&FA),Y:JSR SendByte   :\ Send control block
+5740DEY:CPY #&01:BNE LFC5F     :\ Loop for &11..&02
+5750DEY:LDA (&FA),Y:TAX
+5760INY:LDA (&FA),Y:TAY        :\ Get pathname address to XY
+5770JSR SendString             :\ Send pathname
+5780PLA:JSR SendByte           :\ Send function
+5790JSR WaitByte:PHA           :\ Wait for result
+5800LDY #&11
+5810.LFC7E
+5820JSR WaitByte:STA (&FA),Y   :\ Get control block back
+5830DEY:CPY #&01:BNE LFC7E     :\ Loop for &11..&02
+5840LDY &FB:LDX &FA            :\ Restore registers
+5850PLA:RTS                    :\ Get result and return
+5860
+5870
+5880\ OSGBPB - Multiple byte Read and write
+5890\ =====================================
+5900\ On entry, A =function
+5910\           XY=>control block
+5920\ On exit,  A =returned value
+5930\              control block updated
+5940\
+5950\ Tube data  &16 block function  --   block Carry result
+5960\
+5970.osGBPB
+5980STY &FB:STX &FA              :\ &FA/B=>control block
+5990PHA:LDA #&16:JSR SendCommand :\ Send command &16 - OSGBPB
+6000LDY #&0C
+6010.LFC9A
+6020LDA (&FA),Y:JSR SendByte   :\ Send control block
+6030DEY:BPL LFC9A              :\ Loop for &0C..&00
+6040PLA:JSR SendByte           :\ Send function
+6050LDY #&0C
+6060.LFCA8
+6070JSR WaitByte:STA (&FA),Y   :\ Get control block back
+6080DEY:BPL LFCA8              :\ Loop for &0C..&00
+6090LDY &FB:LDX &FA            :\ Restore registers
+6100JMP WaitCarryChar          :\ Jump to get Carry and result
+6110
+6120
+6130.Unsupported
+6140BRK:EQUB 255:EQUS "Bad":EQUB 0
+6150
+6160
+6170\ OSWORD control block lengths
+6180\ ============================
+6190.WordLengthsLo
+6200EQUB &00:EQUB &05:EQUB &00:EQUB &05
+6210EQUB &02:EQUB &05:EQUB &08:EQUB &0E
+6220EQUB &04:EQUB &01:EQUB &01:EQUB &05
+6230EQUB &00:EQUB &01:EQUB &20:EQUB &10
+6240EQUB &0D:EQUB &00:EQUB &04:EQUB &80
+6250.WordLengthsHi
+6260EQUB &05:EQUB &00:EQUB &05:EQUB &00
+6270EQUB &05:EQUB &00:EQUB &00:EQUB &00
+6280EQUB &05:EQUB &09:EQUB &05:EQUB &00
+6290EQUB &08:EQUB &18:EQUB &00:EQUB &01
+6300EQUB &0D:EQUB &80:EQUB &04:EQUB &80
+6310
+6320
+6330\ Interrupt Handler
+6340\ =================
+6350.InterruptHandler
+6360STA &FC:PLA:PHA            :\ Save A, get flags from stack
+6370AND #&10:BNE BRKHandler    :\ If BRK, jump to BRK handler
+6380JMP (IRQ1V)                :\ Continue via IRQ1V handler
+6390
+6400.IRQ1Handler
+6410BIT TubeS4:BMI LFD3F       :\ If data in Tube R4, jump to process errors and transferes
+6420BIT TubeS1:BMI LFD18       :\ If data in Tube R1, jump to process Escape and Events
+6430JMP (IRQ2V)                :\ Pass on to IRQ2V
+6440
+6450.BRKHandler
+6460TXA:PHA                    :\ Save X
+6470TSX:LDA &0103,X            :\ Get address from stack
+6480CLD:SEC:SBC #&01:STA &FD
+6490LDA &0104,X:SBC #&00:STA &FE :\ &FD/E=>after BRK opcode
+6500PLA:TAX:LDA &FC            :\ Restore X, get saved A
+6510CLI:JMP (BRKV)             :\ Restore IRQs, jump to Error Handler
+6520
+6530
+6540\ Interrupt generated by data in Tube R1
+6550\ --------------------------------------
+6560.LFD18
+6570LDA TubeR1:BMI LFD39       :\ b7=1, jump to set Escape state
+6580TYA:PHA:TXA:PHA            :\ Save registers
+6590JSR LFE80:TAY              :\ Get Y parameter from Tube R1
+6600JSR LFE80:TAX              :\ Get X parameter from Tube R1
+6610JSR LFE80                  :\ Get event number from Tube R1
+6620JSR LFD36:PLA:TAX:PLA:TAY  :\ Dispatch event, restore registers
+6630LDA &FC:RTI                :\ Restore A, return from interrupt
+6640.LFD36
+6650JMP (EVNTV)
+6660.LFD39
+6670ASL A:STA &FF              :\ Set Escape flag from b6
+6680LDA &FC:RTI                :\ Restore A, return from interrupt
+6690
+6700
+6710\ Interrupt generated by data in Tube R4
+6720\ --------------------------------------
+6730.LFD3F
+6740LDA TubeR4:BPL LFD65       :\ b7=0, jump for data transfer
+6750CLI
+6760.LFD45
+6770BIT TubeS2:BPL LFD45       :\ Wait for data in Tube R2
+6780LDA TubeR2
+6790LDA #&00:STA ERRBUF:TAY    :\ Store BRK opcode in error buffer
+6800JSR WaitByte:STA ERRBUF+1  :\ Get error number
+6810.LFD59
+6820INY:JSR WaitByte           :\ Store bytes fetched from Tube R2
+6830STA ERRBUF+1,Y:BNE LFD59   :\ Loop until final zero
+6840JMP ERRBUF                 :\ Jump to error block to generate error
+6850
+6860\ Data transfer initiated by IRQ via Tube R4
+6870\ ------------------------------------------
+6880.LFD65
+6890STA NMIV+0:TYA:PHA         :\ Save transfer type, save Y
+6900LDY NMIV+0                 :\ Get transfer type back
+6910LDA LFE70,Y:STA NMIV+0     :\ get NMI routine address from table
+6920LDA LFE78,Y:STA NMIV+1     :\ and point NMIV to it
+6930LDA LFE60,Y:STA &F4        :\ Point &F4/5 to transfer address field
+6940LDA LFE68,Y:STA &F5
+6950.LFD83
+6960BIT TubeS4:BPL LFD83       :\ Wait until Tube R4 data present
+6970LDA TubeR4                 :\ Get called ID from Tube R4
+6980CPY #&05:BEQ LFDE7         :\ If 'TubeRelease', jump to exit
+6990TYA:PHA:LDY #&01           :\ Save transfer type
+7000.LFD93
+7010BIT TubeS4:BPL LFD93       :\ Wait for Tube R4 data present
+7020LDA TubeR4                 :\ Fetch and disgard address byte 4
+7030.LFD9B
+7040BIT TubeS4:BPL LFD9B       :\ Wait for Tube R4 data present
+7050LDA TubeR4                 :\ Fetch and disgard address byte 3
+7060.LFDA3
+7070BIT TubeS4:BPL LFDA3       :\ Wait for Tube R4 data present
+7080LDA TubeR4:STA (&F4),Y:DEY :\ Fetch address byte 2, store in address
+7090.LFDAE
+7100BIT TubeS4:BPL LFDAE       :\ Wait for Tube R4 data present
+7110LDA TubeR4:STA (&F4),Y     :\ Fetch address byte 1, store in address
+7120BIT TubeR3:BIT TubeR3      :\ Read from Tube R3 twice
+7130.LFDBE
+7140BIT TubeS4:BPL LFDBE       :\ Wait for Tube R4 data present
+7150LDA TubeR4:PLA             :\ Get sync byte from Tube R4
+7160CMP #&06:BCC LFDE7         :\ Exit if not 256-byte transfers
+7170BNE LFDEC                  :\ Jump with 256-byte read
+7180
+7190\ Send 256 bytes to Tube via R3
+7200\ -----------------------------
+7210LDY #&00
+7220.LFDCF
+7230LDA TubeS3:AND #&80:BPL LFDCF:\ Wait for Tube R3 free
+7240.NMI6Addr
+7250LDA &FFFF,Y:STA TubeR3     :\ Fetch byte and send to Tube R3
+7260INY:BNE LFDCF              :\ Loop for 256 bytes
+7270.LFDDF
+7280BIT TubeS3:BPL LFDDF       :\ Wait for Tube R3 free
+7290STA TubeR3                 :\ Send final sync byte
+7300.LFDE7
+7310PLA:TAY:LDA &FC:RTI        :\ Restore registers and return
+7320
+7330\ Read 256 bytes from Tube via R3
+7340\ -------------------------------
+7350.LFDEC
+7360LDY #&00
+7370.LFDEE
+7380LDA TubeS3:AND #&80:BPL LFDEE:\ Wait for Tube R3 data present
+7390LDA TubeR3                 :\ Fetch byte from Tube R3
+7400.NMI7Addr
+7410STA &FFFF,Y:INY:BNE LFDEE  :\ Store byte and loop for 256 bytes
+7420BEQ LFDE7                  :\ Jump to restore registers and return
+7430
+7440\ Transfer 0 - Transfer single byte to Tube
+7450\ -----------------------------------------
+7460.NMI0
+7470PHA                        :\ Save A
+7480.NMI0Addr
+7490LDA &FFFF:STA TubeR3       :\ Get byte and send to Tube R3
+7500INC NMI0Addr+1:BNE LFE0F   :\ Increment transfer address
+7510INC NMI0Addr+2
+7520.LFE0F
+7530PLA:RTI                    :\ Restore A and return
+7540
+7550\ Transfer 1 - Transfer single byte from Tube
+7560\ -------------------------------------------
+7570.NMI1
+7580PHA:LDA TubeR3             :\ Save A, get byte from Tube R3
+7590.NMI1Addr
+7600STA &FFFF                  :\ Store byte
+7610INC NMI1Addr+1:BNE LFE20   :\ Increment transfer address
+7620INC NMI1Addr+2
+7630.LFE20
+7640PLA:RTI                    :\ Restore A and return
+7650
+7660\ Transfer 2 - Transfer two bytes to Tube
+7670\ ---------------------------------------
+7680.NMI2
+7690PHA:TYA:PHA:LDY #&00       :\ Save registers
+7700LDA (&F6),Y:STA TubeR3     :\ Get byte and send to Tube R3
+7710INC &F6:BNE LFE32:INC &F7  :\ Increment transfer address
+7720.LFE32
+7730LDA (&F6),Y:STA TubeR3     :\ Get byte and send to Tube R3
+7740INC &F6:BNE LFE3D:INC &F7  :\ Increment transfer address
+7750.LFE3D
+7760PLA:TAY:PLA:RTI            :\ Restore registers and return
+7770
+7780\ Transfer 3 - Transfer two bytes from Tube
+7790\ -----------------------------------------
+7800.NMI3
+7810PHA:TYA:PHA:LDY #&00       :\ Save registers
+7820LDA TubeR3:STA (&F6),Y     :\ Get byte from Tube R3 and store
+7830INC &F6:BNE LFE51:INC &F7  :\ Increment transfer address
+7840.LFE51
+7850LDA TubeR3:STA (&F6),Y     :\ Get byte from Tube R3 and store
+7860INC &F6:BNE LFE5C:INC &F7  :\ Increment transfer address
+7870.LFE5C
+7880PLA:TAY:PLA:RTI            :\ Restore registers and return
+7890
+7900\ Data transfer address pointers
+7910\ ------------------------------
+7920.LFE60
+7930EQUB (NMI0Addr+1) AND 255:EQUB (NMI1Addr+1) AND 255
+7940EQUB &00F6 AND 255       :EQUB &00F6 AND 255
+7950EQUB &00F6 AND 255       :EQUB &00F6 AND 255
+7960EQUB (NMI6Addr+1) AND 255:EQUB (NMI7Addr+1) AND 255
+7970.LFE68
+7980EQUB (NMI0Addr+1) DIV 256:EQUB (NMI1Addr+1) DIV 256
+7990EQUB &00F6 DIV 256       :EQUB &00F6 DIV 256
+8000EQUB &00F6 DIV 256       :EQUB &00F6 DIV 256
+8010EQUB (NMI6Addr+1) DIV 256:EQUB (NMI7Addr+1) DIV 256
+8020
+8030\ Data transfer routine addresses
+8040\ -------------------------------
+8050.LFE70
+8060EQUB NMI0 AND 255   :EQUB NMI1 AND 255
+8070EQUB NMI2 AND 255   :EQUB NMI3 AND 255
+8080EQUB NMI_Ack AND 255:EQUB NMI_Ack AND 255
+8090EQUB NMI_Ack AND 255:EQUB NMI_Ack AND 255
+8100.LFE78
+8110EQUB NMI0 DIV 256   :EQUB NMI1 DIV 256
+8120EQUB NMI2 DIV 256   :EQUB NMI3 DIV 256
+8130EQUB NMI_Ack DIV 256:EQUB NMI_Ack DIV 256
+8140EQUB NMI_Ack DIV 256:EQUB NMI_Ack DIV 256
+8150
+8160
+8170\ Wait for byte in Tube R1 while allowing requests via Tube R4
+8180\ ============================================================
+8190.LFE80
+8200BIT TubeS1:BMI LFE94       :\ If data in Tube R1, jump to fetch it
+8210.LFE85
+8220BIT TubeS4                 :\ Check if data present in Tube R4
+8230BPL LFE80                  :\ If nothing there, jump back to check Tube R1
+8240LDA &FC                    :\ Save IRQ's A store in A register
+8250PHP:CLI:PLP                :\ Allow an IRQ through to process R4 request
+8260STA &FC:JMP LFE80          :\ Restore IRQ's A store and jump back to check R1
+8270.LFE94
+8280LDA TubeR1:RTS             :\ Fetch byte from Tube R1 and return
+8290
+8300
+8310\ Print embedded string
+8320\ =====================
+8330.PrText
+8340PLA:STA &FA:PLA:STA &FB    :\ &FA/B=>embedded string
+8350LDY #&00
+8360.LFEA0
+8370INC &FA:BNE LFEA6:INC &FB  :\ Increment address
+8380.LFEA6
+8390LDA (&FA),Y:BMI LFEB0      :\ Get character, exit if >&7F
+8400JSR OSWRCH:JMP LFEA0       :\ Print character and loop back for more
+8410.LFEB0
+8420JMP (&00FA)                :\ Jump back to code after string
+8430
+8440
+8450\ Null NMI code
+8460\ -------------
+8470.NMI_Ack
+8480STA TubeR3:RTI             :\ Store to TubeR3 to acknowlege NMI
+8490
+8500
+8510\ Spare space
+8520\ ===========
+8530EQUS STRING$(&FEF0-P%,CHR$255)
+8540
+8550
+8560\ I/O Space
+8570\ =========
+8580EQUS STRING$(8,CHR$0)
+8590
+8600\ Tube I/O Registers
+8610\ ==================
+8620.TubeS1 :\ &FEF8 :EQUB 0
+8630.TubeR1 :\ &FEF9 :EQUB 0
+8640.TubeS2 :\ &FEFA :EQUB 0
+8650.TubeR2 :\ &FEFB :EQUB 0
+8660.TubeS3 :\ &FEFC :EQUB 0
+8670.TubeR3 :\ &FEFD :EQUB 0
+8680.TubeS4 :\ &FEFE :EQUB 0
+8690.TubeR4 :\ &FEFF :EQUB 0
+8700
+8710
+8720\ Spare space
+8730\ ===========
+8740.LFF00
+8750EQUS STRING$(&FF80-P%,CHR$255)
+8760
+8770
+8780\ DEFAULT VECTOR TABLE
+8790\ ====================
+8800.LFF80
+8810EQUW Unsupported      :\ &200 - USERV
+8820EQUW ErrorHandler     :\ &202 - BRKV
+8830EQUW IRQ1Handler      :\ &204 - IRQ1V
+8840EQUW Unsupported      :\ &206 - IRQ2V
+8850EQUW osCLI            :\ &208 - CLIV
+8860EQUW osBYTE           :\ &20A - BYTEV
+8870EQUW osWORD           :\ &20C - WORDV
+8880EQUW osWRCH           :\ &20E - WRCHV
+8890EQUW osRDCH           :\ &210 - RDCHV
+8900EQUW osFILE           :\ &212 - FILEV
+8910EQUW osARGS           :\ &214 - ARGSV
+8920EQUW osBGET           :\ &216 - BGetV
+8930EQUW osBPUT           :\ &218 - BPutV
+8940EQUW osGBPB           :\ &21A - GBPBV
+8950EQUW osFIND           :\ &21C - FINDV
+8960EQUW Unsupported      :\ &21E - FSCV
+8970EQUW NullReturn       :\ &220 - EVNTV
+8980EQUW Unsupported      :\ &222 - UPTV
+8990EQUW Unsupported      :\ &224 - NETV
+9000EQUW Unsupported      :\ &226 - VduV
+9010EQUW Unsupported      :\ &228 - KEYV
+9020EQUW Unsupported      :\ &22A - INSV
+9030EQUW Unsupported      :\ &22C - RemV
+9040EQUW Unsupported      :\ &22E - CNPV
+9050EQUW NullReturn       :\ &230 - IND1V
+9060EQUW NullReturn       :\ &232 - IND2V
+9070EQUW NullReturn       :\ &234 - IND3V
+9080
+9090.VECDEF :\ &FFB6 :EQUB &36:EQUW LFF80
+9100.OSXXXX :\ &FFB9 :JMP Unsupported
+9110.OSXXXX :\ &FFBC :JMP Unsupported
+9120.OSXXXX :\ &FFBF :JMP Unsupported
+9130.OSXXXX :\ &FFC2 :JMP Unsupported
+9140.OSXXXX :\ &FFC5 :JMP Unsupported
+9150.NVRDCH :\ &FFC8 :JMP osRDCH
+9160.NVWRCH :\ &FFCB :JMP osWRCH
+9170
+9180.OSFIND :\ &FFCE :JMP (FINDV)
+9190.OSGBPB :\ &FFD1 :JMP (GBPBV)
+9200.OSBPUT :\ &FFD4 :JMP (BPutV)
+9210.OSBGET :\ &FFD7 :JMP (BGetV)
+9220.OSARGS :\ &FFDA :JMP (ARGSV)
+9230.OSFILE :\ &FFDD :JMP (FILEV)
+9240
+9250.OSRDCH :\ &FFE0 :JMP (RDCHV)
+9260.OSASCI :\ &FFE3 :CMP #&0D:BNE OSWRCH
+9270.OSNEWL :\ &FFE7 :LDA #&0A:JSR OSWRCH
+9280.OSWRCR :\ &FFEC :LDA #&0D
+9290.OSWRCH :\ &FFEE :JMP (WRCHV)
+9300.OSWORD :\ &FFF1 :JMP (WORDV)
+9310.OSBYTE :\ &FFF4 :JMP (BYTEV)
+9320.OS_CLI :\ &FFF7 :JMP (CLIV)
+9330
+9340.NMIV   :\ &FFFA :EQUW NMI0             :\ NMI Vector
+9350.RESETV :\ &FFFC :EQUW RESET            :\ RESET Vector
+9360.IRQV   :\ &FFFE :EQUW InterruptHandler :\ IRQ Vector
+9370]:NEXT
+9380OSCLI"Save Client "+STR$~mcode%+" "+STR$~O%+" "+STR$~load%+" "+STR$~load%
+9390ON ERROR ON ERROR OFF:END
+9400*Quit
