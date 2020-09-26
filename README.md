@@ -22,6 +22,7 @@ Predominantly old stuff, with the odd remastered item.
 * [AUG/AUG.pdf](./AUG/AUG.pdf) - https://stardot.org.uk/forums/viewtopic.php?f=42&t=17242
 * [AUG/NAUG.pdf](./AUG/NAUG.pdf) - https://stardot.org.uk/forums/viewtopic.php?f=42&t=17243
 * [BASIC/Advanced_BASIC_ROM_User_Guide.pdf](./BASIC/Advanced_BASIC_ROM_User_Guide.pdf) - https://stardot.org.uk/forums/viewtopic.php?t=13860
+* [Master128/Master_Reference_Manual_Part_1.pdf](./Master_Reference_Manual_Part_1.pdf)], [Master128/Master_Reference_Manual_Part_2.pdf](./Master_Reference_Manual_Part_2.pdf)] - https://stardot.org.uk/forums/viewtopic.php?f=42&t=20466
 * [tube/CoProClient.txt](./tube/CoProClient.txt) - http://mdfs.net/Software/Tube/6502/
 * [tube/tube_121.txt](./tube/tube_121.txt) - http://www.zeridajh.org/articles/various/assembly_sources/index.htm
 * [tube/TubeClient.txt](./tube/TubeClient.txt) - http://mdfs.net/Software/Tube/6502/
