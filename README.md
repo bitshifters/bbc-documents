@@ -1,8 +1,12 @@
 Miscellanous grab bag of publicly available BBC Micro-related
 documents: data sheets, reference manuals, user guides, disassemblies,
-etc.
+etc. - predominantly old stuff, but with the odd remastered item.
 
-Predominantly old stuff, with the odd remastered item.
+I've been accumulating this stuff for years, and eventually I created
+this repo so I'd have it all in one place.
+
+I keep it up to date on an ad-hoc basis. Newer versions of some items
+may well be available from the links in the Sources section.
 
 # TOC
 
@@ -14,6 +18,7 @@ Predominantly old stuff, with the odd remastered item.
 * [FS](./FS/) - stuff relating to filing systems
 * [ICs](./ICs/) - data sheets
 * [Master128](./Master128/) - Master 128
+* [MasterCompact](./MasterCompact/) - Master Compact
 * [NuLA](./NuLA/) - Video NuLA 
 * [Tube](./Tube/) - Tube info
 
@@ -24,6 +29,7 @@ Predominantly old stuff, with the odd remastered item.
 * [BASIC/Advanced_BASIC_ROM_User_Guide.pdf](./BASIC/Advanced_BASIC_ROM_User_Guide.pdf) - https://stardot.org.uk/forums/viewtopic.php?t=13860
 * [Master128/Master_Reference_Manual_Part_1.pdf](./Master_Reference_Manual_Part_1.pdf)], [Master128/Master_Reference_Manual_Part_2.pdf](./Master_Reference_Manual_Part_2.pdf)] - https://stardot.org.uk/forums/viewtopic.php?f=42&t=20466
 * [Master128/master1.gif](./Master128/master1.gif), [Master128/master2.gif](./Master128/master2.gif) - http://mdfs.net/Info/Comp/BBC/Circuits/
+* [MasterCompact/compact.gif](./MasterCompact/compact.gif) - https://mdfs.net/Info/Comp/BBC/Circuits/
 * [tube/CoProClient.txt](./tube/CoProClient.txt) - http://mdfs.net/Software/Tube/6502/
 * [tube/tube_121.txt](./tube/tube_121.txt) - http://www.zeridajh.org/articles/various/assembly_sources/index.htm
 * [tube/TubeClient.txt](./tube/TubeClient.txt) - http://mdfs.net/Software/Tube/6502/
