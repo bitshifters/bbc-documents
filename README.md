@@ -29,6 +29,7 @@ may well be available from the links in the Sources section.
 * [BASIC/Advanced_BASIC_ROM_User_Guide.pdf](./BASIC/Advanced_BASIC_ROM_User_Guide.pdf) - https://stardot.org.uk/forums/viewtopic.php?t=13860
 * [Master128/Master_Reference_Manual_Part_1.pdf](./Master_Reference_Manual_Part_1.pdf)], [Master128/Master_Reference_Manual_Part_2.pdf](./Master_Reference_Manual_Part_2.pdf)] - https://stardot.org.uk/forums/viewtopic.php?f=42&t=20466
 * [Master128/master1.gif](./Master128/master1.gif), [Master128/master2.gif](./Master128/master2.gif) - http://mdfs.net/Info/Comp/BBC/Circuits/
+* [Master128/bbc_master_circuit_diagram.pdf](./Master128/bbc_master_circuit_diagram.pdf) - https://stardot.org.uk/forums/viewtopic.php?f=42&t=22660
 * [MasterCompact/compact.gif](./MasterCompact/compact.gif) - https://mdfs.net/Info/Comp/BBC/Circuits/
 * [tube/CoProClient.txt](./tube/CoProClient.txt) - http://mdfs.net/Software/Tube/6502/
 * [tube/tube_121.txt](./tube/tube_121.txt) - http://www.zeridajh.org/articles/various/assembly_sources/index.htm
