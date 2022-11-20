@@ -34,6 +34,7 @@ may well be available from the links in the Sources section.
 * [tube/CoProClient.txt](./tube/CoProClient.txt) - http://mdfs.net/Software/Tube/6502/
 * [tube/tube_121.txt](./tube/tube_121.txt) - http://www.zeridajh.org/articles/various/assembly_sources/index.htm
 * [tube/TubeClient.txt](./tube/TubeClient.txt) - http://mdfs.net/Software/Tube/6502/
+* [tube/6502 2nd Processor Circuit Diagram.gif](./tube/6502 2nd Processor Circuit Diagram.gif) - http://mdfs.net/Software/Tube/6502/
 * [B/BBC-circuit-diagram.png](./B/BBC-circuit-diagram.png) - https://stardot.org.uk/forums/viewtopic.php?f=3&t=17583
 
 # Other links
