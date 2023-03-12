@@ -26,6 +26,8 @@ may well be available from the links in the Sources section.
 
 * [AUG/AUG.pdf](./AUG/AUG.pdf) - https://stardot.org.uk/forums/viewtopic.php?f=42&t=17242
 * [AUG/NAUG.pdf](./AUG/NAUG.pdf) - https://stardot.org.uk/forums/viewtopic.php?f=42&t=17243
+* [B/BBC_User_Guide.pdf](./B/BBC_User_Guide.pdf) - https://stardot.org.uk/forums/viewtopic.php?t=14024
+* [B+/BBC_B+_User_Guide.pdf](./B+/BBC_B+_User_Guide.pdf) - https://stardot.org.uk/forums/viewtopic.php?t=14024
 * [BASIC/Advanced_BASIC_ROM_User_Guide.pdf](./BASIC/Advanced_BASIC_ROM_User_Guide.pdf) - https://stardot.org.uk/forums/viewtopic.php?t=13860
 * [Master128/Master_Reference_Manual_Part_1.pdf](./Master_Reference_Manual_Part_1.pdf)], [Master128/Master_Reference_Manual_Part_2.pdf](./Master_Reference_Manual_Part_2.pdf)] - https://stardot.org.uk/forums/viewtopic.php?f=42&t=20466
 * [Master128/master1.gif](./Master128/master1.gif), [Master128/master2.gif](./Master128/master2.gif) - http://mdfs.net/Info/Comp/BBC/Circuits/
