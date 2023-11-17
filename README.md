@@ -39,6 +39,7 @@ may well be available from the links in the Sources section.
 * [tube/TubeClient.txt](./tube/TubeClient.txt) - http://mdfs.net/Software/Tube/6502/
 * [tube/6502 2nd Processor Circuit Diagram.gif](./tube/6502 2nd Processor Circuit Diagram.gif) - http://mdfs.net/Software/Tube/6502/
 * [B/BBC-circuit-diagram.png](./B/BBC-circuit-diagram.png) - https://stardot.org.uk/forums/viewtopic.php?f=3&t=17583
+* [Master128/MOS350.txt](./Master128/MOS350.txt) - https://mdfs.net/System/ROMs/AcornMOS/Master350/UserGuide
 
 # Other links
 
