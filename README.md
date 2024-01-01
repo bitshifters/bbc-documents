@@ -31,6 +31,7 @@ may well be available from the links in the Sources section.
 * [BASIC/Advanced_BASIC_ROM_User_Guide.pdf](./BASIC/Advanced_BASIC_ROM_User_Guide.pdf) - https://stardot.org.uk/forums/viewtopic.php?t=13860
 * [Electron/Electron Advanced User Guide.pdf](./Electron/Electron%20Advanced%20User%20Guide.pdf) - https://stardot.org.uk/forums/viewtopic.php?t=23193
 * [Master128/Master_Reference_Manual_Part_1.pdf](./Master_Reference_Manual_Part_1.pdf)], [Master128/Master_Reference_Manual_Part_2.pdf](./Master_Reference_Manual_Part_2.pdf)] - https://stardot.org.uk/forums/viewtopic.php?f=42&t=20466
+* [Master128/Advanced_Master_Reference_Manual](./Master128/Advanced_Master_Reference_Manual.pdf) - https://stardot.org.uk/forums/viewtopic.php?t=21734
 * [Master128/master1.gif](./Master128/master1.gif), [Master128/master2.gif](./Master128/master2.gif) - http://mdfs.net/Info/Comp/BBC/Circuits/
 * [Master128/bbc_master_circuit_diagram.pdf](./Master128/bbc_master_circuit_diagram.pdf) - https://stardot.org.uk/forums/viewtopic.php?f=42&t=22660
 * [MasterCompact/compact.gif](./MasterCompact/compact.gif) - https://mdfs.net/Info/Comp/BBC/Circuits/
