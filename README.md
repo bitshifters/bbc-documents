@@ -29,6 +29,7 @@ may well be available from the links in the Sources section.
 * [B/BBC_User_Guide.pdf](./B/BBC_User_Guide.pdf) - https://stardot.org.uk/forums/viewtopic.php?t=14024
 * [B+/BBC_B+_User_Guide.pdf](./B+/BBC_B+_User_Guide.pdf) - https://stardot.org.uk/forums/viewtopic.php?t=14024
 * [BASIC/Advanced_BASIC_ROM_User_Guide.pdf](./BASIC/Advanced_BASIC_ROM_User_Guide.pdf) - https://stardot.org.uk/forums/viewtopic.php?t=13860
+* [BASIC/BASIC_ROM_User_Guide.pdf](./BASIC/BASIC_ROM_User_Guide.pdf) - https://stardot.org.uk/forums/viewtopic.php?t=13861
 * [Electron/Electron Advanced User Guide.pdf](./Electron/Electron%20Advanced%20User%20Guide.pdf) - https://stardot.org.uk/forums/viewtopic.php?t=23193
 * [Master128/Master_Reference_Manual_Part_1.pdf](./Master_Reference_Manual_Part_1.pdf)], [Master128/Master_Reference_Manual_Part_2.pdf](./Master_Reference_Manual_Part_2.pdf)] - https://stardot.org.uk/forums/viewtopic.php?f=42&t=20466
 * [Master128/Advanced_Master_Reference_Manual](./Master128/Advanced_Master_Reference_Manual.pdf) - https://stardot.org.uk/forums/viewtopic.php?t=21734
